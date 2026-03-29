@@ -576,6 +576,54 @@ Return only the JSON object, nothing else.
                     user_intent = line[5:].strip()
                     break
 
+        # Deterministic fast path: explicit knowledge_base invocation from UI prompt wrapper.
+        # This avoids an extra LLM assessment round and starts plugin execution immediately.
+        try:
+            kb_plugin = None
+            kb_has_ask = False
+            p_iter = plugins.items() if isinstance(plugins, dict) else enumerate(plugins)
+            for _, p in p_iter:
+                if not isinstance(p, dict):
+                    continue
+                if p.get("id") != "knowledge_base":
+                    continue
+                kb_plugin = p
+                for e in (p.get("entries") or []):
+                    if isinstance(e, dict) and e.get("id") == "ask":
+                        kb_has_ask = True
+                        break
+                break
+
+            def _extract_kb_question(raw: str) -> str:
+                s = (raw or "").strip()
+                if not s:
+                    return ""
+                patterns = [
+                    r"^基于用户插件knowledge_base回答[:：]\s*(.+)$",
+                    r"^knowledge_base\s*[:：]\s*(.+)$",
+                    r"^我试试knowledge_base(?:显示|回答)[,，:：]\s*(.+)$",
+                ]
+                for pat in patterns:
+                    m = re.match(pat, s, flags=re.IGNORECASE)
+                    if m:
+                        return (m.group(1) or "").strip()
+                return ""
+
+            fast_q = _extract_kb_question(user_intent)
+            if kb_plugin and kb_has_ask and fast_q:
+                logger.info("[UserPlugin Assessment] Fast-path to knowledge_base.ask, q_len=%d", len(fast_q))
+                return UserPluginDecision(
+                    has_task=True,
+                    can_execute=True,
+                    task_description=f"knowledge_base ask: {fast_q[:80]}",
+                    plugin_id="knowledge_base",
+                    entry_id="ask",
+                    plugin_args={"question": fast_q, "top_k": 4},
+                    reason="fast_path_explicit_kb",
+                )
+        except Exception as e:
+            logger.debug("[UserPlugin Assessment] fast-path check failed: %s", e)
+
         user_prompt = f"Conversation:\n{conversation}\n\nUser intent (one-line): {user_intent}"
 
         max_retries = 3
@@ -857,7 +905,10 @@ Return only the JSON object, nothing else.
         # user plugin 支路（由外部 provider 提供插件列表）
         plugins = []
         if user_plugin_enabled:
-            await self.plugin_list_provider()
+            # Fast path: use cached plugin list first to reduce per-turn startup latency.
+            await self.plugin_list_provider(force_refresh=False)
+            if not self.plugin_list:
+                await self.plugin_list_provider(force_refresh=True)
             plugins = self.plugin_list
 
         if user_plugin_enabled and plugins:

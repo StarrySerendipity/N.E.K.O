@@ -71,7 +71,7 @@ async def websocket_endpoint(websocket: WebSocket, lanlan_name: str):
     mgr.websocket = websocket
     logger.info(f"✅ 已设置 {lanlan_name} 的WebSocket连接")
 
-    if mgr.pending_agent_callbacks:
+    if mgr.pending_agent_callbacks and mgr.should_proactive_rephrase_callbacks():
         logger.info(f"[{lanlan_name}] websocket reconnect: {len(mgr.pending_agent_callbacks)} pending callbacks, scheduling delivery")
         asyncio.create_task(mgr.trigger_agent_callbacks())
 

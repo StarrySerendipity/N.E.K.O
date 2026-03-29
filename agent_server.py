@@ -743,18 +743,21 @@ def _build_user_turn_fingerprint(messages: Any) -> Optional[str]:
     """
     if not isinstance(messages, list):
         return None
-    user_parts: list[str] = []
-    for m in messages:
+    latest_user_text = ""
+    # Use the latest user turn only. This keeps early-trigger and turn-end-trigger
+    # fingerprints consistent for the same question and prevents duplicate runs.
+    for m in reversed(messages):
         if not isinstance(m, dict):
             continue
         if m.get("role") != "user":
             continue
         text = str(m.get("text") or m.get("content") or "").strip()
         if text:
-            user_parts.append(text)
-    if not user_parts:
+            latest_user_text = text
+            break
+    if not latest_user_text:
         return None
-    payload = "\n".join(user_parts).encode("utf-8", errors="ignore")
+    payload = latest_user_text.encode("utf-8", errors="ignore")
     return hashlib.sha256(payload).hexdigest()
 
 

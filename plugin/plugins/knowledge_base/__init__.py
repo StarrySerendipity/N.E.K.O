@@ -156,6 +156,41 @@ def _build_retrieval_fallback_answer(question: str, chosen: List[Tuple[float, st
     return f"已命中文档片段：{preview[:180]}"
 
 
+def _normalize_math_for_readability(text: str) -> str:
+    """Convert common LaTeX snippets into plain text for chat UI readability."""
+    s = (text or "").strip()
+    if not s:
+        return ""
+
+    # Strip display/inline math wrappers first.
+    s = re.sub(r"\$\$(.*?)\$\$", r"\1", s, flags=re.DOTALL)
+    s = re.sub(r"\$(.*?)\$", r"\1", s, flags=re.DOTALL)
+    s = re.sub(r"\\\[(.*?)\\\]", r"\1", s, flags=re.DOTALL)
+    s = re.sub(r"\\\((.*?)\\\)", r"\1", s, flags=re.DOTALL)
+
+    # Convert common structural LaTeX commands.
+    s = re.sub(r"\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
+    s = re.sub(r"\\sqrt\s*\{([^{}]+)\}", r"sqrt(\1)", s)
+    s = re.sub(r"\\times", " * ", s)
+    s = re.sub(r"\\cdot", " * ", s)
+    s = re.sub(r"\\div", " / ", s)
+    s = re.sub(r"\\leq", " <= ", s)
+    s = re.sub(r"\\geq", " >= ", s)
+    s = re.sub(r"\\neq", " != ", s)
+
+    # Basic superscript/subscript unwrapping.
+    s = re.sub(r"\^\{([^{}]+)\}", r"^(\1)", s)
+    s = re.sub(r"_\{([^{}]+)\}", r"_(\1)", s)
+
+    # Remove unsupported commands but keep payload where possible.
+    s = re.sub(r"\\text\{([^{}]+)\}", r"\1", s)
+    s = re.sub(r"\\left|\\right", "", s)
+    s = re.sub(r"\\[a-zA-Z]+", "", s)
+
+    s = re.sub(r"\s{2,}", " ", s)
+    return s.strip()
+
+
 def _lexical_score(question: str, text: str) -> float:
     q = (question or "").strip()
     t = (text or "").strip()
@@ -795,6 +830,8 @@ class KnowledgeBasePlugin(NekoPluginBase):
             "你是文档问答助手。"
             "请严格基于提供的文档片段回答。"
             "如果文档片段无法支持答案，请明确回答：文档中没有足够信息。"
+            "回答中的数学表达式请使用易读的纯文本形式（例如 (a)/(b), sqrt(x), x^2），"
+            "不要输出原始 LaTeX 控制序列。"
         )
         user_prompt = (
             f"【文档片段】\n{context_text}\n\n"
@@ -838,5 +875,6 @@ class KnowledgeBasePlugin(NekoPluginBase):
         clean_content = re.sub(r"^<\|begin_of_box\|>", "", clean_content)
         clean_content = re.sub(r"<\|end_of_box\|>$", "", clean_content)
         clean_content = clean_content.strip()
+        clean_content = _normalize_math_for_readability(clean_content)
 
         return Ok(clean_content)

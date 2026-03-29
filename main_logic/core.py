@@ -204,6 +204,21 @@ class LLMSessionManager:
             'browser_use_enabled': False,
             'user_plugin_enabled': False,
         }
+        # Single-pass mode: plugin-first then one final in-character response.
+        _core_cfg = self._config_manager.get_core_config()
+        _sp_raw = _core_cfg.get('SINGLE_PASS_PLUGIN_FIRST', True)
+        self.single_pass_plugin_first_enabled = str(_sp_raw).strip().lower() not in ('0', 'false', 'no', 'off', '')
+        _sp_wait_ms_raw = _core_cfg.get('SINGLE_PASS_PLUGIN_WAIT_BUDGET_MS', None)
+        _sp_wait_raw = _core_cfg.get('SINGLE_PASS_PLUGIN_WAIT_SECONDS', 10.0)
+        try:
+            if _sp_wait_ms_raw is not None:
+                _sp_wait_raw = float(_sp_wait_ms_raw) / 1000.0
+            self.single_pass_plugin_wait_seconds = max(0.0, min(float(_sp_wait_raw), 12.0))
+        except Exception:
+            self.single_pass_plugin_wait_seconds = 10.0
+        # Track latest backend task_update events so single-pass can wait based on real plugin decision.
+        self._agent_task_update_seq: int = 0
+        self._last_agent_task_update: dict = {}
         
         # 模式标志: 'audio' 或 'text'
         self.input_mode = 'audio'
@@ -263,6 +278,135 @@ class LLMSessionManager:
             return value
         except Exception:
             return 300
+
+    def should_proactive_rephrase_callbacks(self) -> bool:
+        """Whether callbacks should be proactively spoken as a second turn."""
+        if not self.single_pass_plugin_first_enabled:
+            return True
+        # In single-pass mode, proactive replay is allowed only when there are
+        # callbacks that are not marked as inline-only.
+        for cb in self.pending_agent_callbacks:
+            if not isinstance(cb, dict):
+                return True
+            if not bool(cb.get('suppress_proactive', False)):
+                return True
+        return False
+
+    async def _publish_early_analyze_request(self, user_text: str) -> bool:
+        """Send analyze_request on user input arrival to overlap plugin execution with main turn."""
+        text = (user_text or '').strip()
+        if not text:
+            return False
+        try:
+            from main_logic.agent_event_bus import publish_analyze_request_reliably
+
+            sent = await publish_analyze_request_reliably(
+                lanlan_name=self.lanlan_name,
+                trigger='user_input_early',
+                messages=[{'role': 'user', 'content': text}],
+                ack_timeout_s=0.35,
+                retries=0,
+                conversation_id=uuid4().hex,
+            )
+            return bool(sent)
+        except Exception as e:
+            logger.debug("[%s] early analyze_request failed: %s", self.lanlan_name, e)
+            return False
+
+    async def _wait_for_new_agent_callback(self, baseline_count: int, timeout_s: float) -> bool:
+        """Wait briefly for new callback arrival so one-pass output can include plugin result."""
+        if timeout_s <= 0:
+            return False
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while asyncio.get_event_loop().time() < deadline:
+            if len(self.pending_agent_callbacks) > baseline_count:
+                return True
+            await asyncio.sleep(0.05)
+        return False
+
+    def on_agent_task_update(self, task: dict) -> None:
+        """Receive task_update forwarded by main_server for backend/frontend synchronization."""
+        try:
+            if isinstance(task, dict):
+                self._agent_task_update_seq += 1
+                self._last_agent_task_update = dict(task)
+        except Exception:
+            pass
+
+    def _is_knowledge_base_ask_task(self, task: dict) -> bool:
+        if not isinstance(task, dict):
+            return False
+        if str(task.get('type') or '') != 'user_plugin':
+            return False
+        if str(task.get('status') or '') not in ('running', 'completed', 'failed'):
+            return False
+        params = task.get('params') if isinstance(task.get('params'), dict) else {}
+        plugin_id = str(params.get('plugin_id') or '').strip()
+        entry_id = str(params.get('entry_id') or '').strip()
+        return plugin_id == 'knowledge_base' and entry_id == 'ask'
+
+    async def _wait_for_user_plugin_task_decision(self, baseline_seq: int, timeout_s: float) -> tuple[bool, bool]:
+        """Wait briefly for backend task decision.
+
+        Returns:
+            (known, should_wait)
+            - known=False means no task decision observed within discovery window.
+            - should_wait=True means task is knowledge_base.ask and single-pass should hold.
+        """
+        if timeout_s <= 0:
+            return (False, False)
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while asyncio.get_event_loop().time() < deadline:
+            if self._agent_task_update_seq > baseline_seq:
+                task = self._last_agent_task_update if isinstance(self._last_agent_task_update, dict) else {}
+                if str(task.get('type') or '') == 'user_plugin' and str(task.get('status') or '') == 'running':
+                    return (True, self._is_knowledge_base_ask_task(task))
+            await asyncio.sleep(0.05)
+        return (False, False)
+
+    def _is_likely_knowledge_query(self, user_text: str) -> bool:
+        """Heuristic gate: only hold single-pass waiting for likely KB retrieval requests."""
+        text = (user_text or '').strip().lower()
+        if not text:
+            return False
+        keyword_hits = (
+            '知识库', '文档', 'markdown', '检索', '引用', '根据文档', '查文档',
+            'knowledge base', 'knowledge_base', 'kb', 'document', 'citation',
+        )
+        if any(k in text for k in keyword_hits):
+            return True
+        # Questions that ask for source-grounded answers are usually KB-oriented.
+        return ('依据' in text or '来源' in text or '出处' in text)
+
+    def _should_wait_single_pass_for_text(self, user_text: str) -> bool:
+        """Decide whether this turn should wait for plugin callback before final response."""
+        if not self.single_pass_plugin_first_enabled:
+            return False
+        if not self.agent_flags.get('agent_enabled', False):
+            return False
+        if not self.agent_flags.get('user_plugin_enabled', False):
+            return False
+        mode = str(self._config_manager.get_core_config().get('SINGLE_PASS_PLUGIN_WAIT_MODE', 'knowledge_base_only')).strip().lower()
+        if mode in ('always', 'all'):
+            return True
+        return self._is_likely_knowledge_query(user_text)
+
+    async def _emit_single_pass_status(self, text: str, status: str = 'running') -> None:
+        """Send lightweight status hints so frontend and backend stay in sync during hold window."""
+        ws = self.websocket
+        if not ws or not hasattr(ws, 'send_json'):
+            return
+        try:
+            if hasattr(ws, 'client_state') and ws.client_state != ws.client_state.CONNECTED:
+                return
+            await ws.send_json({
+                'type': 'agent_notification',
+                'text': text,
+                'source': 'brain',
+                'status': status,
+            })
+        except Exception:
+            pass
 
     async def _clear_tts_pipeline(self):
         """清空 TTS 请求/响应队列和待处理缓存，停止当前合成。"""
@@ -434,8 +578,8 @@ class LLMSessionManager:
             except Exception as e:
                 logger.error(f"💥 Hot-swap preparation error: {e}")
 
-        # After each turn: deliver any queued agent task callbacks via LLM rephrase
-        if self.pending_agent_callbacks:
+        # After each turn: deliver callbacks proactively only in two-pass mode.
+        if self.pending_agent_callbacks and self.should_proactive_rephrase_callbacks():
             asyncio.create_task(self.trigger_agent_callbacks())
 
     async def handle_response_discarded(self, reason: str, attempt: int, max_attempts: int, will_retry: bool, message: Optional[str] = None):
@@ -1447,8 +1591,8 @@ class LLMSessionManager:
                 # 处理在session启动期间可能已经缓存的输入数据
                 await self._flush_pending_input_data()
 
-                # WebSocket 重连后，投递因断线积压的 agent 任务回调
-                if self.pending_agent_callbacks:
+                # WebSocket 重连后，仅在二次回调模式下主动投递积压回调。
+                if self.pending_agent_callbacks and self.should_proactive_rephrase_callbacks():
                     asyncio.create_task(self.trigger_agent_callbacks())
             else:
                 raise Exception("Session not initialized")
@@ -2072,9 +2216,17 @@ class LLMSessionManager:
         if not self.pending_agent_callbacks:
             return
 
+        deliverable_callbacks = [
+            cb for cb in self.pending_agent_callbacks
+            if isinstance(cb, dict) and not bool(cb.get('suppress_proactive', False))
+        ]
+        if not deliverable_callbacks:
+            logger.debug("[%s] trigger_agent_callbacks: all callbacks are inline-only, skip proactive replay", self.lanlan_name)
+            return
+
         # Build the instruction from all pending callbacks
         items: list[str] = []
-        for cb in self.pending_agent_callbacks:
+        for cb in deliverable_callbacks:
             status = cb.get("status", "completed")
             summary = (cb.get("summary") or "").strip()
             if not summary:
@@ -2089,8 +2241,6 @@ class LLMSessionManager:
                 items.append(f"{tag} {summary}")
 
         if not items:
-            self.pending_agent_callbacks.clear()
-            self.pending_extra_replies.clear()
             return
 
         _lang = normalize_language_code(self.user_language, format='short')
@@ -2099,12 +2249,15 @@ class LLMSessionManager:
             + "\n".join(items)
         )
 
-        callbacks_snapshot = list(self.pending_agent_callbacks)
+        callbacks_snapshot = list(deliverable_callbacks)
 
         self._agent_delivery_in_progress = True
         try:
             if isinstance(self.session, OmniRealtimeClient):
-                self.pending_agent_callbacks.clear()
+                self.pending_agent_callbacks = [
+                    cb for cb in self.pending_agent_callbacks
+                    if not (isinstance(cb, dict) and not bool(cb.get('suppress_proactive', False)))
+                ]
                 logger.debug("[%s] trigger_agent_callbacks: voice mode, deferring to hot-swap", self.lanlan_name)
 
             elif isinstance(self.session, OmniOfflineClient):
@@ -2115,7 +2268,10 @@ class LLMSessionManager:
                     async with self.lock:
                         self.current_speech_id = str(uuid4())
                     logger.debug("[%s] trigger_agent_callbacks: text session ready, calling stream_proactive", self.lanlan_name)
-                    self.pending_agent_callbacks.clear()
+                    self.pending_agent_callbacks = [
+                        cb for cb in self.pending_agent_callbacks
+                        if not (isinstance(cb, dict) and not bool(cb.get('suppress_proactive', False)))
+                    ]
                     delivered = await self.session.stream_proactive(instruction)
                     logger.debug("[%s] trigger_agent_callbacks: text session stream_proactive delivered=%s", self.lanlan_name, delivered)
                     if delivered:
@@ -2134,7 +2290,10 @@ class LLMSessionManager:
                     async with self._proactive_write_lock:
                         async with self.lock:
                             self.current_speech_id = str(uuid4())
-                        self.pending_agent_callbacks.clear()
+                        self.pending_agent_callbacks = [
+                            cb for cb in self.pending_agent_callbacks
+                            if not (isinstance(cb, dict) and not bool(cb.get('suppress_proactive', False)))
+                        ]
                         delivered = await self.session.stream_proactive(instruction)
                         if delivered:
                             self.pending_extra_replies.clear()
@@ -2498,6 +2657,37 @@ class LLMSessionManager:
                 
                 # 文本模式：直接发送文本
                 if isinstance(data, str):
+                    user_text = data.strip()
+                    baseline_callbacks = len(self.pending_agent_callbacks)
+                    baseline_task_seq = self._agent_task_update_seq
+                    if user_text:
+                        await self._publish_early_analyze_request(user_text)
+                        should_wait = False
+                        if self.single_pass_plugin_first_enabled:
+                            mode = str(self._config_manager.get_core_config().get('SINGLE_PASS_PLUGIN_WAIT_MODE', 'knowledge_base_only')).strip().lower()
+                            if mode in ('always', 'all'):
+                                should_wait = True
+                            else:
+                                known, kb_wait = await self._wait_for_user_plugin_task_decision(
+                                    baseline_seq=baseline_task_seq,
+                                    timeout_s=1.2,
+                                )
+                                if known:
+                                    should_wait = kb_wait
+                                else:
+                                    # Fallback to heuristic when decision is not yet observable.
+                                    should_wait = self._should_wait_single_pass_for_text(user_text)
+
+                        if should_wait:
+                            await self._emit_single_pass_status('正在检索知识库并整理答案，请稍候...', status='running')
+                            got_callback = await self._wait_for_new_agent_callback(
+                                baseline_count=baseline_callbacks,
+                                timeout_s=self.single_pass_plugin_wait_seconds,
+                            )
+                            if got_callback:
+                                logger.info("[%s] single-pass wait captured plugin callback before main generation", self.lanlan_name)
+                                await self._emit_single_pass_status('已完成检索，正在生成最终回答...', status='running')
+
                     # 先打断当前正在播放的语音（旧speech_id），避免误打断新回复
                     async with self.lock:
                         interrupted_speech_id = self.current_speech_id

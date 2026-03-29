@@ -269,25 +269,41 @@ async def _handle_agent_event(event: dict):
                     "timestamp": event.get("timestamp") or "",
                 }
                 mgr.enqueue_agent_callback(callback)
-                logger.info("[EventBus] %s enqueued callback, scheduling trigger_agent_callbacks", event_type)
-                mgr._pending_agent_callback_task = asyncio.create_task(mgr.trigger_agent_callbacks())
-                if mgr.websocket and hasattr(mgr.websocket, "send_json"):
-                    try:
-                        notif = {
-                            "type": "agent_notification",
-                            "text": text,
-                            "source": "brain",
-                            "status": cb_status,
-                        }
-                        err_msg = event.get("error_message") or ""
-                        if err_msg:
-                            notif["error_message"] = err_msg[:500]
-                        await mgr.websocket.send_json(notif)
-                        logger.info("[EventBus] agent_notification sent to frontend: %.60s", text[:60])
-                    except Exception as e:
-                        logger.warning("[EventBus] agent_notification WS send failed: %s", e)
+                single_pass = bool(getattr(mgr, "single_pass_plugin_first_enabled", False))
+                is_user_plugin_result = (
+                    event_type == "task_result"
+                    and str(event.get("channel") or "") == "user_plugin"
+                )
+                channel_name = str(event.get("channel") or "")
+                is_plugin_like_result = (
+                    event_type == "task_result"
+                    and channel_name in ("user_plugin", "plugin")
+                )
+                is_success = bool(event.get("success", True))
+                if single_pass and is_plugin_like_result and is_success:
+                    callback["suppress_proactive"] = True
+                if single_pass and is_plugin_like_result and is_success:
+                    logger.info("[EventBus] task_result(%s) enqueued only (single-pass mode)", channel_name)
                 else:
-                    logger.warning("[EventBus] agent_notification: no websocket available")
+                    logger.info("[EventBus] %s enqueued callback, scheduling trigger_agent_callbacks", event_type)
+                    mgr._pending_agent_callback_task = asyncio.create_task(mgr.trigger_agent_callbacks())
+                    if mgr.websocket and hasattr(mgr.websocket, "send_json"):
+                        try:
+                            notif = {
+                                "type": "agent_notification",
+                                "text": text,
+                                "source": "brain",
+                                "status": cb_status,
+                            }
+                            err_msg = event.get("error_message") or ""
+                            if err_msg:
+                                notif["error_message"] = err_msg[:500]
+                            await mgr.websocket.send_json(notif)
+                            logger.info("[EventBus] agent_notification sent to frontend: %.60s", text[:60])
+                        except Exception as e:
+                            logger.warning("[EventBus] agent_notification WS send failed: %s", e)
+                    else:
+                        logger.warning("[EventBus] agent_notification: no websocket available")
         elif event_type == "agent_notification":
             if mgr.websocket and hasattr(mgr.websocket, "send_json"):
                 try:
@@ -304,6 +320,10 @@ async def _handle_agent_event(event: dict):
                 except Exception as e:
                     logger.debug("[EventBus] agent_notification send failed: %s", e)
         elif event_type == "task_update":
+            try:
+                mgr.on_agent_task_update(event.get("task", {}) or {})
+            except Exception:
+                pass
             if mgr.websocket and hasattr(mgr.websocket, "send_json"):
                 try:
                     await mgr.websocket.send_json({"type": "agent_task_update", "task": event.get("task", {})})

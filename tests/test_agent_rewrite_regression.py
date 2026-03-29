@@ -56,6 +56,19 @@ def _contains_call(func_node, attr_name: str) -> bool:
     return False
 
 
+def test_task_executor_has_explicit_kb_fast_path():
+    source = Path("brain/task_executor.py").read_text(encoding="utf-8")
+    assert "fast_path_explicit_kb" in source
+    assert "基于用户插件knowledge_base回答" in source
+
+
+def test_knowledge_base_normalizes_math_for_readability():
+    source = Path("plugin/plugins/knowledge_base/__init__.py").read_text(encoding="utf-8")
+    assert "def _normalize_math_for_readability" in source
+    assert "_normalize_math_for_readability(clean_content)" in source
+    assert "不要输出原始 LaTeX 控制序列" in source
+
+
 def test_core_config_uses_agent_model_only():
     cfg = get_config_manager().get_core_config()
     assert "AGENT_MODEL" in cfg
@@ -716,6 +729,66 @@ def test_on_session_event_dispatches_ack_and_analyze():
         "_on_session_event does not call _background_analyze_and_plan"
     assert "create_task" in func_src, \
         "_on_session_event does not use create_task for async dispatch"
+
+
+def test_main_server_task_update_syncs_into_session_manager():
+    """_handle_agent_event should forward task_update payload to session manager state."""
+    source = Path("main_server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    func = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_handle_agent_event":
+            func = node
+            break
+    assert func is not None, "_handle_agent_event not found"
+    func_src = ast.get_source_segment(source, func) or ""
+    assert "on_agent_task_update" in func_src, \
+        "_handle_agent_event does not call mgr.on_agent_task_update in task_update branch"
+
+
+def test_main_server_single_pass_marks_user_plugin_callback_inline_only():
+    """Successful user_plugin task_result should be marked suppress_proactive in single-pass mode."""
+    source = Path("main_server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    func = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_handle_agent_event":
+            func = node
+            break
+    assert func is not None, "_handle_agent_event not found"
+    func_src = ast.get_source_segment(source, func) or ""
+    assert "suppress_proactive" in func_src, \
+        "single-pass callback suppression flag missing in _handle_agent_event"
+
+
+def test_core_trigger_agent_callbacks_skips_inline_only_callbacks():
+    """trigger_agent_callbacks should filter callbacks with suppress_proactive=True."""
+    source = Path("main_logic/core.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    func = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "trigger_agent_callbacks":
+            func = node
+            break
+    assert func is not None, "trigger_agent_callbacks not found"
+    func_src = ast.get_source_segment(source, func) or ""
+    assert "suppress_proactive" in func_src, \
+        "trigger_agent_callbacks does not filter suppress_proactive callbacks"
+
+
+def test_core_publish_early_analyze_request_not_locally_flag_gated():
+    """Early analyze publish should not be blocked by stale local agent_flags."""
+    source = Path("main_logic/core.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    func = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_publish_early_analyze_request":
+            func = node
+            break
+    assert func is not None, "_publish_early_analyze_request not found"
+    func_src = ast.get_source_segment(source, func) or ""
+    assert "agent_flags.get('agent_enabled'" not in func_src
+    assert "agent_flags.get('user_plugin_enabled'" not in func_src
 
 
 # ---------------------------------------------------------------------------

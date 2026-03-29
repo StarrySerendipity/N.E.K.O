@@ -177,6 +177,23 @@ Computer Use 会根据 `assistApi` 自动选择对应提供商的视觉模型：
 | `REALTIME_MODEL_*` | 实时模型 | PROVIDER, URL, API_KEY |
 | `TTS_MODEL_*` | TTS 模型 | PROVIDER, URL, API_KEY |
 
+### 9. Agent 单次输出优化（Single-pass）
+
+用于“插件先检索，主对话一次性输出”的同步优化开关。
+
+| 配置项 | 配置文件字段（`core_config.json`） | 环境变量 | 默认值 | 说明 |
+|-------|----------------------------------|----------|--------|------|
+| 单次输出主开关 | `SINGLE_PASS_PLUGIN_FIRST` | `NEKO_SINGLE_PASS_PLUGIN_FIRST` | `true` | 开启后，优先走插件结果注入本轮主回复，避免二次回调播报 |
+| 等待预算（秒） | `SINGLE_PASS_PLUGIN_WAIT_SECONDS` | `NEKO_SINGLE_PASS_PLUGIN_WAIT_SECONDS` | `10.0` | 主对话在文本输入阶段等待插件回调的最长时间，代码内会限制到 `0~12` |
+| 等待预算（毫秒，别名） | `SINGLE_PASS_PLUGIN_WAIT_BUDGET_MS` | `NEKO_SINGLE_PASS_PLUGIN_WAIT_BUDGET_MS` | - | 若设置该项，将覆盖秒配置；推荐 `4000~8000` |
+| 等待策略 | `SINGLE_PASS_PLUGIN_WAIT_MODE` | `NEKO_SINGLE_PASS_PLUGIN_WAIT_MODE` | `knowledge_base_only` | `knowledge_base_only` 仅对知识库类问题等待；`always` 对所有文本问题等待 |
+
+建议：
+
+- 首次上线建议使用 `knowledge_base_only` + `6.0` 秒。
+- 若知识库响应较慢，可先调整到 `7~8` 秒再观察首包延迟。
+- 若追求极致实时性，可下调到 `3~4` 秒并接受部分轮次回退到普通主回复。
+
 ## 🔄 配置优先级
 
 配置系统按以下优先级加载配置：
