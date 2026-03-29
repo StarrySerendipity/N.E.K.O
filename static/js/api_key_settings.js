@@ -743,6 +743,60 @@ async function loadCurrentApiKey() {
     }
 }
 
+async function loadKnowledgeBasePluginConfig() {
+    const setVal = (id, value) => {
+        const el = document.getElementById(id);
+        if (el && typeof value === 'string') {
+            el.value = value;
+        }
+    };
+
+    try {
+        const response = await fetch('/api/config/knowledge_base_plugin');
+        if (!response.ok) {
+            return false;
+        }
+        const data = await response.json();
+        if (!data || data.success !== true) {
+            return false;
+        }
+
+        setVal('kbBaseUrl', data.base_url || '');
+        setVal('kbApiKey', data.api_key || '');
+        setVal('kbChatModel', data.chat_model || '');
+        setVal('kbEmbeddingModel', data.embedding_model || '');
+        return true;
+    } catch (error) {
+        console.warn('loadKnowledgeBasePluginConfig failed:', error);
+        return false;
+    }
+}
+
+async function saveKnowledgeBasePluginConfig(payload) {
+    try {
+        const response = await fetch('/api/config/knowledge_base_plugin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            showStatus('知识库插件配置保存失败，请稍后重试', 'error');
+            return false;
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            showStatus(`知识库插件配置保存失败: ${result.error || '未知错误'}`, 'error');
+            return false;
+        }
+        return true;
+    } catch (error) {
+        showStatus(`知识库插件配置保存失败: ${error.message || error}`, 'error');
+        return false;
+    }
+}
+
 // 全局变量存储待保存的API Key
 let pendingApiKey = null;
 
@@ -1139,6 +1193,17 @@ async function save_button_down(e) {
         const el = document.getElementById(id);
         return el ? el.value.trim() : '';
     };
+
+    const kbPayload = {
+        base_url: getVal('kbBaseUrl'),
+        api_key: getVal('kbApiKey'),
+        chat_model: getVal('kbChatModel'),
+        embedding_model: getVal('kbEmbeddingModel'),
+    };
+    const kbSaved = await saveKnowledgeBasePluginConfig(kbPayload);
+    if (!kbSaved) {
+        return;
+    }
 
     const conversationModelUrl = getVal('conversationModelUrl');
     const conversationModelId = getVal('conversationModelId');
@@ -1721,6 +1786,7 @@ async function initializePage() {
         }
 
         await loadCurrentApiKey();
+        await loadKnowledgeBasePluginConfig();
 
         const UI_SETTLE_DELAY = 300;
         await new Promise(resolve => setTimeout(resolve, UI_SETTLE_DELAY));

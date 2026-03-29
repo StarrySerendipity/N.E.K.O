@@ -193,7 +193,46 @@
                         </div>
                     </div>
 
-                    <!-- ============ Area 3: API Key Book (Collapsible) ============ -->
+                    <!-- ============ Area 3: Knowledge Base Plugin Config ============ -->
+                    <div class="api-key-info" id="knowledge-base-config-section">
+                        <h3>
+                            <img src="/static/icons/summary_model_icon.png" alt=""
+                                style="width: 48px; height: 48px; vertical-align: middle; margin-right: 8px;">
+                            <span>知识库插件配置</span>
+                            <div class="tooltip-container">
+                                <span class="tooltip-icon">?</span>
+                                <div class="tooltip-content">
+                                    <strong>用于 knowledge_base 插件：</strong><br>
+                                    • API URL：知识库插件使用的兼容 OpenAI 接口地址<br>
+                                    • API Key：知识库插件调用所用密钥<br>
+                                    • Chat Model：问答模型 ID<br>
+                                    • Embedding Model：向量化模型 ID
+                                </div>
+                            </div>
+                        </h3>
+                        <div class="field-row">
+                            <label for="kbBaseUrl">API URL</label>
+                            <input type="text" id="kbBaseUrl" placeholder="e.g., https://api.siliconflow.cn/v1"
+                                style="max-width: 600px; width: 100%;">
+                        </div>
+                        <div class="field-row">
+                            <label for="kbApiKey">API Key</label>
+                            <input type="text" id="kbApiKey" placeholder="Enter knowledge base API key"
+                                style="max-width: 600px; width: 100%;">
+                        </div>
+                        <div class="field-row">
+                            <label for="kbChatModel">Chat Model ID</label>
+                            <input type="text" id="kbChatModel" placeholder="e.g., zai-org/GLM-4.6V"
+                                style="max-width: 600px; width: 100%;">
+                        </div>
+                        <div class="field-row">
+                            <label for="kbEmbeddingModel">Embedding Model ID</label>
+                            <input type="text" id="kbEmbeddingModel" placeholder="e.g., Qwen/Qwen3-Embedding-8B"
+                                style="max-width: 600px; width: 100%;">
+                        </div>
+                    </div>
+
+                    <!-- ============ Area 4: API Key Book (Collapsible) ============ -->
                     <div id="key-book-section" class="section" style="margin-top: 0;">
                         <button id="key-book-toggle-btn" onclick="toggleKeyBook()">
                             <img src="/static/icons/dropdown_arrow.png" data-i18n-alt="common.expand" class="dropdown-icon">
@@ -209,7 +248,7 @@
                         </div>
                     </div>
 
-                    <!-- ============ Area 4: Custom API Section ============ -->
+                    <!-- ============ Area 5: Custom API Section ============ -->
                     <div id="custom-api-section">
                         <button id="custom-api-toggle-btn" onclick="toggleCustomApiSection()">
                             <img src="/static/icons/dropdown_arrow.png" data-i18n-alt="common.expand"
@@ -688,7 +727,7 @@
     </div>
 
 
-    <script src="/static/js/api_key_settings.js?v=6"></script>
+    <script src="/static/js/api_key_settings.js?v=7"></script>
 
     <!-- Driver.js 库 -->
     <script src="/static/libs/driver.min.js"></script>

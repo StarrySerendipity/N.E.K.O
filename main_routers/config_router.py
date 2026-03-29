@@ -13,6 +13,7 @@ import json
 import os
 import threading
 import urllib.parse
+from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -44,6 +45,44 @@ VRM_USER_PATH = "/user_vrm"  # 用户文档目录下的 VRM 模型路径
 # MMD 模型路径常量
 MMD_STATIC_PATH = "/static/mmd"  # 项目目录下的 MMD 模型路径
 MMD_USER_PATH = "/user_mmd"  # 用户文档目录下的 MMD 模型路径
+
+_KB_PLUGIN_ID = "knowledge_base"
+_KB_DEFAULT_PROFILE = "default"
+
+
+def _normalize_kb_config(raw: object) -> dict[str, str]:
+    root_cfg = raw if isinstance(raw, dict) else {}
+    kb_cfg_obj = root_cfg.get("knowledge_base") if isinstance(root_cfg, dict) else {}
+    kb_cfg = kb_cfg_obj if isinstance(kb_cfg_obj, dict) else {}
+    return {
+        "base_url": str(kb_cfg.get("base_url", "")).strip(),
+        "api_key": str(kb_cfg.get("api_key", "")).strip(),
+        "chat_model": str(kb_cfg.get("chat_model", "")).strip(),
+        "embedding_model": str(kb_cfg.get("embedding_model", "")).strip(),
+    }
+
+
+async def _fetch_plugin_config_effective_and_profile() -> tuple[dict[str, str], str]:
+    import httpx
+    from config import USER_PLUGIN_SERVER_PORT
+
+    base_url = f"http://127.0.0.1:{USER_PLUGIN_SERVER_PORT}"
+    async with httpx.AsyncClient(timeout=10, proxy=None, trust_env=False) as client:
+        config_resp = await client.get(f"{base_url}/plugin/{_KB_PLUGIN_ID}/config")
+        config_resp.raise_for_status()
+        config_payload = config_resp.json() if config_resp.content else {}
+        cfg_obj = config_payload.get("config") if isinstance(config_payload, dict) else {}
+        normalized = _normalize_kb_config(cfg_obj)
+
+        profile_resp = await client.get(f"{base_url}/plugin/{_KB_PLUGIN_ID}/config/profiles")
+        profile_resp.raise_for_status()
+        profile_payload = profile_resp.json() if profile_resp.content else {}
+        profiles_obj = profile_payload.get("config_profiles") if isinstance(profile_payload, dict) else None
+        profiles = profiles_obj if isinstance(profiles_obj, dict) else {}
+        active_obj = profiles.get("active")
+        profile_name = active_obj.strip() if isinstance(active_obj, str) and active_obj.strip() else _KB_DEFAULT_PROFILE
+
+    return normalized, profile_name
 
 
 @router.get("/character_reserved_fields")
@@ -517,6 +556,80 @@ async def get_core_config_api():
             "success": False,
             "error": str(e)
         }
+
+
+@router.get("/knowledge_base_plugin")
+async def get_knowledge_base_plugin_config_api():
+    """获取 knowledge_base 插件配置（含 profile 覆盖后的 effective config）。"""
+    try:
+        cfg, profile_name = await _fetch_plugin_config_effective_and_profile()
+        cfg["profile"] = profile_name
+        cfg["success"] = True
+        return cfg
+    except Exception as e:
+        logger.error(f"获取 knowledge_base 插件配置失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/knowledge_base_plugin")
+async def update_knowledge_base_plugin_config_api(request: Request):
+    """更新 knowledge_base 插件配置（写入 active profile 覆盖层，而非 plugin.toml）。"""
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return {"success": False, "error": "无效的数据"}
+
+        updates = {
+            "base_url": str(data.get("base_url", "")).strip(),
+            "api_key": str(data.get("api_key", "")).strip(),
+            "chat_model": str(data.get("chat_model", "")).strip(),
+            "embedding_model": str(data.get("embedding_model", "")).strip(),
+        }
+
+        import httpx
+        from config import USER_PLUGIN_SERVER_PORT
+
+        _, profile_name = await _fetch_plugin_config_effective_and_profile()
+        upsert_payload = {
+            "config": {
+                "knowledge_base": {
+                    "base_url": updates["base_url"],
+                    "api_key": updates["api_key"],
+                    "chat_model": updates["chat_model"],
+                    "embedding_model": updates["embedding_model"],
+                }
+            }
+            ,"make_active": True
+        }
+
+        base_url = f"http://127.0.0.1:{USER_PLUGIN_SERVER_PORT}"
+        async with httpx.AsyncClient(timeout=10, proxy=None, trust_env=False) as client:
+            upsert_resp = await client.put(
+                f"{base_url}/plugin/{_KB_PLUGIN_ID}/config/profiles/{profile_name}",
+                json=upsert_payload,
+            )
+            upsert_resp.raise_for_status()
+            upsert_result = upsert_resp.json() if upsert_resp.content else {}
+
+        profile_obj = upsert_result.get("profile") if isinstance(upsert_result, dict) else {}
+        profile = profile_obj if isinstance(profile_obj, dict) else {}
+
+        logger.info(
+            "knowledge_base 插件配置已写入 profile: plugin=%s profile=%s path=%s",
+            _KB_PLUGIN_ID,
+            profile_name,
+            profile.get("resolved_path"),
+        )
+
+        return {
+            "success": True,
+            "profile": profile_name,
+            "profile_path": profile.get("resolved_path"),
+            **updates,
+        }
+    except Exception as e:
+        logger.error(f"更新 knowledge_base 插件配置失败: {e}")
+        return {"success": False, "error": str(e)}
 
 
 
