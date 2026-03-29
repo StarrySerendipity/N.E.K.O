@@ -1,0 +1,26 @@
+[plugin]
+name = "极简知识库"
+description = "上传多个 Markdown 文档，支持查看/删除文档与检索增强问答（硅基流动）"
+version = "0.4.0"
+id = "knowledge_base"
+entry = "plugin.plugins.knowledge_base:KnowledgeBasePlugin"
+
+[plugin.author]
+name = "N.E.K.O Team"
+
+[plugin.sdk]
+recommended = ">=0.1.0,<0.2.0"
+supported = ">=0.1.0,<0.3.0"
+
+[plugin_runtime]
+enabled = true
+auto_start = true
+
+[plugin.store]
+enabled = false
+
+[knowledge_base]
+base_url = "https://api.siliconflow.cn/v1"
+api_key = "sk-swimsjmrstgxwrdjegvvztwaaqqihxtpmvbruxivovhxmzxl"
+chat_model = "zai-org/GLM-4.6V"
+embedding_model = "Qwen/Qwen3-Embedding-8B"
