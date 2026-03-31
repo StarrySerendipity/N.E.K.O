@@ -585,19 +585,39 @@ async def update_knowledge_base_plugin_config_api(request: Request):
             "chat_model": str(data.get("chat_model", "")).strip(),
             "embedding_model": str(data.get("embedding_model", "")).strip(),
         }
+        # Optional fields: when provided, write-through to keep legacy and new UIs consistent.
+        optional_updates = {}
+        if "rag_mode" in data:
+            optional_updates["rag_mode"] = str(data.get("rag_mode", "")).strip()
+        if "doc_top_n" in data:
+            optional_updates["doc_top_n"] = data.get("doc_top_n")
+        if "context_budget_chars" in data:
+            optional_updates["context_budget_chars"] = data.get("context_budget_chars")
+        if "hybrid_alpha" in data:
+            optional_updates["hybrid_alpha"] = data.get("hybrid_alpha")
+        if "strict_embedding" in data:
+            optional_updates["strict_embedding"] = data.get("strict_embedding")
+        if "rerank_enabled" in data:
+            optional_updates["rerank_enabled"] = data.get("rerank_enabled")
+        if "rerank_model" in data:
+            optional_updates["rerank_model"] = data.get("rerank_model")
+        if "rerank_top_n" in data:
+            optional_updates["rerank_top_n"] = data.get("rerank_top_n")
 
         import httpx
         from config import USER_PLUGIN_SERVER_PORT
 
-        _, profile_name = await _fetch_plugin_config_effective_and_profile()
+        cfg_effective, profile_name = await _fetch_plugin_config_effective_and_profile()
+        existing_kb = cfg_effective.get("knowledge_base") if isinstance(cfg_effective, dict) else {}
+        if not isinstance(existing_kb, dict):
+            existing_kb = {}
+
+        # Preserve existing kb fields (e.g. rag_mode / retrieval params) to avoid accidental reset.
+        merged_kb = {**existing_kb, **updates, **optional_updates}
+
         upsert_payload = {
             "config": {
-                "knowledge_base": {
-                    "base_url": updates["base_url"],
-                    "api_key": updates["api_key"],
-                    "chat_model": updates["chat_model"],
-                    "embedding_model": updates["embedding_model"],
-                }
+                "knowledge_base": merged_kb
             }
             ,"make_active": True
         }
@@ -626,6 +646,7 @@ async def update_knowledge_base_plugin_config_api(request: Request):
             "profile": profile_name,
             "profile_path": profile.get("resolved_path"),
             **updates,
+            **({"rag_mode": merged_kb.get("rag_mode")} if merged_kb.get("rag_mode") is not None else {}),
         }
     except Exception as e:
         logger.error(f"更新 knowledge_base 插件配置失败: {e}")

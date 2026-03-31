@@ -363,7 +363,12 @@ class LLMSessionManager:
         while asyncio.get_event_loop().time() < deadline:
             if self._agent_task_update_seq > baseline_seq:
                 task = self._last_agent_task_update if isinstance(self._last_agent_task_update, dict) else {}
-                if str(task.get('type') or '') == 'user_plugin' and str(task.get('status') or '') == 'running':
+                if str(task.get('type') or '') == 'user_plugin' and str(task.get('status') or '') in ('running', 'completed', 'failed'):
+                    # Conservative fallback: user_plugin task detected but params not yet populated,
+                    # hold this turn to avoid the main model replying from stale conversation memory.
+                    params = task.get('params') if isinstance(task.get('params'), dict) else {}
+                    if not params:
+                        return (True, True)
                     return (True, self._is_knowledge_base_ask_task(task))
             await asyncio.sleep(0.05)
         return (False, False)
@@ -2731,6 +2736,10 @@ class LLMSessionManager:
                                 else:
                                     # Fallback to heuristic when decision is not yet observable.
                                     should_wait = self._should_wait_single_pass_for_text(user_text)
+                        else:
+                            # Even when single-pass is disabled, avoid obvious KB-intent turns being answered
+                            # from chat history before plugin retrieval callback is available.
+                            should_wait = self._is_likely_knowledge_query(user_text) and bool(self.agent_flags.get('user_plugin_enabled', False))
 
                         if should_wait:
                             await self._emit_single_pass_status('正在检索知识库并整理答案，请稍候...', status='running')

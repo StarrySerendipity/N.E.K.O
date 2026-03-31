@@ -2395,11 +2395,11 @@ CONTEXT_SUMMARY_TASK_FOOTER = {
 
 # ---------- Agent callback 系统通知 ----------
 AGENT_CALLBACK_NOTIFICATION = {
-    'zh': '======[系统通知：以下是最近完成的后台任务情况，请在回复中自然地提及或确认]\n',
-    'en': '======[System Notice: The following background tasks were recently completed. Please naturally mention or acknowledge them in your reply.]\n',
-    'ja': '======[システム通知：以下は最近完了したバックグラウンドタスクです。返答の中で自然に言及または確認してください。]\n',
-    'ko': '======[시스템 알림：다음은 최근 완료된 백그라운드 작업입니다. 답변에서 자연스럽게 언급하거나 확인하세요.]\n',
-    'ru': '======[Системное уведомление: следующие фоновые задачи недавно завершены. Пожалуйста, естественно упомяните или подтвердите их в своём ответе.]\n',
+    'zh': '======[系统通知：以下是最近完成的后台任务情况。请将其作为可靠依据融入回复，并遵守以下要求：\n- 使用 Markdown 输出；\n- 数学公式用 LaTeX（行内 $...$，独立公式 $$...$$）；\n- 仅基于通知内容回答，不要臆测或编造。]\n',
+    'en': '======[System Notice: The following background tasks were recently completed. Treat them as authoritative and follow: \n- Respond in Markdown.\n- Use LaTeX for math ($...$ inline, $$...$$ block).\n- Base your reply only on the notice; do not invent details.]\n',
+    'ja': '======[システム通知：以下は最近完了したバックグラウンドタスクです。内容を根拠にし、次を守って回答してください：\n- Markdown で出力する。\n- 数式は LaTeX（行内 $...$、独立式 $$...$$）。\n- 通知内容のみに基づき、推測や捏造をしない。]\n',
+    'ko': '======[시스템 알림: 다음은 최근 완료된 백그라운드 작업입니다. 이를 근거로 다음을 지켜 답변하세요:\n- Markdown으로 출력.\n- 수식은 LaTeX(인라인 $...$, 블록 $$...$$).\n- 알림 내용만 근거로 하고 추측/허위 추가 금지.]\n',
+    'ru': '======[Системное уведомление: следующие фоновые задачи недавно завершены. Считайте их надёжным источником и соблюдайте: \n- Ответ в Markdown.\n- Формулы LaTeX ($...$ внутри строки, $$...$$ блок).\n- Отвечайте только на основе уведомления, без выдумок.]\n',
 }
 
 # ---------- 记忆回忆区块 ----------
