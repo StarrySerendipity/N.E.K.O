@@ -271,13 +271,17 @@ class LLMSessionManager:
         self.audio_error_log_interval = 2.0  # 音频错误log间隔（秒）
 
     def _get_text_guard_max_length(self) -> int:
+        default_limit = 450
+        tts_floor_limit = 420
         try:
-            value = int(self._config_manager.get_core_config().get('TEXT_GUARD_MAX_LENGTH', 300))
+            value = int(self._config_manager.get_core_config().get('TEXT_GUARD_MAX_LENGTH', default_limit))
             if value <= 0:
                 raise ValueError
+            if self.use_tts and value < tts_floor_limit:
+                return tts_floor_limit
             return value
         except Exception:
-            return 300
+            return tts_floor_limit if self.use_tts else default_limit
 
     def should_proactive_rephrase_callbacks(self) -> bool:
         """Whether callbacks should be proactively spoken as a second turn."""
@@ -2148,6 +2152,31 @@ class LLMSessionManager:
                 if self.tts_thread and not self.tts_thread.is_alive():
                     self._respawn_tts_worker()
 
+    def _split_plugin_answer_chunks(self, text: str, max_chars: int = 68) -> list[str]:
+        """将直连答案切为较短分段，降低首包语音等待。"""
+        src = (text or "").strip()
+        if not src:
+            return []
+
+        chunks: list[str] = []
+        sentence_parts = re.split(r'(?<=[。！？；!?;])', src)
+        for part in sentence_parts:
+            seg = part.strip()
+            if not seg:
+                continue
+            while len(seg) > max_chars:
+                split_at = seg.rfind('，', 0, max_chars)
+                if split_at <= 0:
+                    split_at = max_chars
+                else:
+                    split_at += 1
+                chunks.append(seg[:split_at])
+                seg = seg[split_at:]
+            if seg:
+                chunks.append(seg)
+
+        return chunks or [src]
+
     async def finish_proactive_delivery(self, full_text: str):
         """流式完成后收尾：一次性投递完整文本 + 记录历史 + TTS/turn end 信号。"""
         async with self._proactive_write_lock:
@@ -2188,10 +2217,35 @@ class LLMSessionManager:
             logger.warning("[%s] deliver_plugin_answer skipped: delivery precheck failed", self.lanlan_name)
             return
 
-        # Important: proactive finisher only emits TTS end signal.
-        # We must feed at least one text chunk first, otherwise no audio is generated.
-        await self.feed_tts_chunk(text)
-        await self.finish_proactive_delivery(text)
+        chunks = self._split_plugin_answer_chunks(text)
+        if not chunks:
+            return
+
+        async with self._proactive_write_lock:
+            for idx, chunk in enumerate(chunks):
+                await self.send_lanlan_response(chunk, is_first_chunk=(idx == 0))
+                await self.feed_tts_chunk(chunk)
+
+            from utils.llm_client import AIMessage as _AIMsg
+            if self.session and hasattr(self.session, '_conversation_history'):
+                self.session._conversation_history.append(_AIMsg(content=text))
+
+            if self.use_tts and self.tts_thread and self.tts_thread.is_alive():
+                try:
+                    self.tts_request_queue.put((None, None))
+                except Exception:
+                    pass
+
+            self.sync_message_queue.put({'type': 'system', 'data': 'turn end'})
+            try:
+                if (self.websocket
+                        and hasattr(self.websocket, 'client_state')
+                        and self.websocket.client_state == self.websocket.client_state.CONNECTED):
+                    await self.websocket.send_json({'type': 'system', 'data': 'turn end'})
+            except Exception:
+                pass
+
+        logger.info("[%s] Plugin direct stream delivered in %d chunks", self.lanlan_name, len(chunks))
 
     async def trigger_agent_callbacks(self) -> None:
         """Proactively deliver pending agent task results via LLM rephrase.
@@ -2348,7 +2402,7 @@ class LLMSessionManager:
             lines.append(f"{tag} {summary}")
             if detail and detail != summary:
                 prefix = _loc(RESULT_PARSER_PHRASES['detail_prefix'], _lang)
-                lines.append(f"{prefix}{detail[:300]}")
+                lines.append(f"{prefix}{detail[:1200]}")
         self.pending_agent_callbacks.clear()
         return "\n".join(lines)
 
@@ -3125,61 +3179,69 @@ class LLMSessionManager:
         import queue as _queue_mod
         q = self.tts_response_queue
         logger.info(f"🎧 tts_response_handler started (queue id={id(q):#x})")
+
+        async def _handle_item(data):
+            if isinstance(data, tuple) and len(data) == 2:
+                if data[0] == "__ready__":
+                    ready_flag = bool(data[1])
+                    async with self.tts_cache_lock:
+                        self.tts_ready = ready_flag
+                    if ready_flag:
+                        logger.info("✅ 收到TTS运行时就绪信号，开始刷新缓存文本")
+                        await self._flush_tts_pending_chunks()
+                    else:
+                        logger.warning("⚠️ 收到TTS未就绪信号，继续缓存文本等待恢复")
+                    return
+                elif data[0] == "__reconnecting__":
+                    logger.info("🌊 TTS 正在自动重连，发送呼吸感状态到前端")
+                    user_msg = json.dumps({"code": "TTS_RECONNECTING", "level": "info"})
+                    asyncio.create_task(self.send_status(user_msg))
+                    return
+                elif data[0] == "__error__":
+                    error_msg = data[1]
+                    error_msg_text = str(error_msg)
+                    logger.error(f"TTS Worker Error: {error_msg}")
+                    error_msg_lower = error_msg_text.lower()
+                    # 识别配额限制
+                    if '欠费' in error_msg_lower or 'standing' in error_msg_lower:
+                        user_msg = json.dumps({"code": "API_ARREARS"})
+                    elif 'quota' in error_msg_lower or 'time limit' in error_msg_lower:
+                        user_msg = json.dumps({"code": "API_QUOTA_TIME"})
+                    elif '429' in error_msg_lower or 'too many' in error_msg_lower:
+                        user_msg = json.dumps({"code": "API_RATE_LIMIT"})
+                    elif 'policy violation' in error_msg_lower:
+                        user_msg = json.dumps({"code": "API_POLICY_VIOLATION", "details": {"msg": error_msg_text}})
+                    elif '1008' in error_msg_lower:
+                        user_msg = json.dumps({"code": "API_1008_FALLBACK", "details": {"msg": error_msg_text}})
+                    else:
+                        user_msg = json.dumps({"code": "TTS_CONNECTION_FAILED", "details": {"msg": error_msg_text}})
+                    asyncio.create_task(self.send_status(user_msg))
+                    return
+            elif isinstance(data, tuple) and len(data) == 3 and data[0] == "__audio__":
+                _, speech_id, audio_payload = data
+                await self.send_speech(audio_payload, speech_id=speech_id)
+                return
+
+            size = len(data) if isinstance(data, (bytes, bytearray)) else f"type={type(data).__name__}"
+            logger.debug(f"🎧 handler dequeued audio: {size}, qsize≈{q.qsize()}")
+            await self.send_speech(data)
+
         while True:
             try:
-                try:
-                    data = q.get_nowait()
-                except _queue_mod.Empty:
-                    await asyncio.sleep(0.01)
-                    continue
+                # Blocking get removes polling delay and reduces idle CPU.
+                data = await asyncio.to_thread(q.get)
+                await _handle_item(data)
 
-                if isinstance(data, tuple) and len(data) == 2:
-                    if data[0] == "__ready__":
-                        ready_flag = bool(data[1])
-                        async with self.tts_cache_lock:
-                            self.tts_ready = ready_flag
-                        if ready_flag:
-                            logger.info("✅ 收到TTS运行时就绪信号，开始刷新缓存文本")
-                            await self._flush_tts_pending_chunks()
-                        else:
-                            logger.warning("⚠️ 收到TTS未就绪信号，继续缓存文本等待恢复")
-                        continue
-                    elif data[0] == "__reconnecting__":
-                        logger.info("🌊 TTS 正在自动重连，发送呼吸感状态到前端")
-                        user_msg = json.dumps({"code": "TTS_RECONNECTING", "level": "info"})
-                        asyncio.create_task(self.send_status(user_msg))
-                        continue
-                    elif data[0] == "__error__":
-                        error_msg = data[1]
-                        error_msg_text = str(error_msg)
-                        logger.error(f"TTS Worker Error: {error_msg}")
-                        error_msg_lower = error_msg_text.lower()
-                        # 识别配额限制
-                        if '欠费' in error_msg_lower or 'standing' in error_msg_lower:
-                            user_msg = json.dumps({"code": "API_ARREARS"})
-                        elif 'quota' in error_msg_lower or 'time limit' in error_msg_lower:
-                            user_msg = json.dumps({"code": "API_QUOTA_TIME"})
-                        elif '429' in error_msg_lower or 'too many' in error_msg_lower:
-                            user_msg = json.dumps({"code": "API_RATE_LIMIT"})
-                        elif 'policy violation' in error_msg_lower:
-                            user_msg = json.dumps({"code": "API_POLICY_VIOLATION", "details": {"msg": error_msg_text}})
-                        elif '1008' in error_msg_lower:
-                            user_msg = json.dumps({"code": "API_1008_FALLBACK", "details": {"msg": error_msg_text}})
-                        else:
-                            user_msg = json.dumps({"code": "TTS_CONNECTION_FAILED", "details": {"msg": error_msg_text}})
-                        asyncio.create_task(self.send_status(user_msg))
-                        continue
-                elif isinstance(data, tuple) and len(data) == 3 and data[0] == "__audio__":
-                    _, speech_id, audio_payload = data
-                    await self.send_speech(audio_payload, speech_id=speech_id)
-                    continue
-
-                size = len(data) if isinstance(data, (bytes, bytearray)) else f"type={type(data).__name__}"
-                logger.debug(f"🎧 handler dequeued audio: {size}, qsize≈{q.qsize()}")
-                await self.send_speech(data)
+                # Drain a small burst to reduce queue buildup under high token rate.
+                for _ in range(24):
+                    try:
+                        burst = q.get_nowait()
+                    except _queue_mod.Empty:
+                        break
+                    await _handle_item(burst)
             except asyncio.CancelledError:
                 logger.info("🎧 tts_response_handler cancelled")
                 raise
             except Exception as e:
                 logger.error(f"💥 tts_response_handler error (will retry): {e}")
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.02)

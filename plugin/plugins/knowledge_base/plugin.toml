@@ -1,7 +1,7 @@
 [plugin]
 name = "极简知识库"
-description = "上传多个 Markdown 文档，支持查看/删除文档与检索增强问答（硅基流动）"
-version = "0.4.0"
+description = "上传多个文档（Markdown/PDF），支持分类文件夹管理与检索增强问答（硅基流动）"
+version = "0.7.0"
 id = "knowledge_base"
 entry = "plugin.plugins.knowledge_base:KnowledgeBasePlugin"
 
@@ -24,3 +24,11 @@ base_url = "https://api.siliconflow.cn/v1"
 api_key = "sk-swimsjmrstgxwrdjegvvztwaaqqihxtpmvbruxivovhxmzxl"
 chat_model = "zai-org/GLM-4.6V"
 embedding_model = "Qwen/Qwen3-Embedding-8B"
+rag_mode = "answer_only"
+doc_top_n = 1
+context_budget_chars = 14000
+hybrid_alpha = 0.68
+strict_embedding = true
+rerank_enabled = true
+rerank_model = "BAAI/bge-reranker-v2-m3"
+rerank_top_n = 36

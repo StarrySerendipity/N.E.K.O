@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from typing import Any
+
+from plugin.utils.time_utils import now_iso
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return now_iso()
 
 
 def _normalize_meta(

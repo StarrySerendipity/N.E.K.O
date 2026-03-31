@@ -35,6 +35,227 @@
         });
     }
 
+    function escapeHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function decodeEscapedLineBreaks(text) {
+        var s = String(text || '').replace(/\r\n/g, '\n');
+        if (s.indexOf('\n') !== -1) return s;
+        if (!/\\n/.test(s)) return s;
+        var count = (s.match(/\\n/g) || []).length;
+        if (count < 2 && !/\\n\\n/.test(s)) return s;
+        return s.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+    }
+
+    function isLikelySafeMathExpression(expr) {
+        var source = String(expr || '').trim();
+        if (!source) return false;
+        if (source.length > 220) return false;
+        if (/\r|\n/.test(source)) return false;
+        if (/(^|[^\\])#/.test(source)) return false;
+        return true;
+    }
+
+    function renderRichInlineHtml(text) {
+        var source = String(text || '');
+        var formulas = [];
+        var tokenized = source.replace(/(\$\$[\s\S]+?\$\$|\$(?:\\.|[^$\\\n])+\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\])/g, function (match) {
+            var token = '__NEKO_MATH_TOKEN_' + formulas.length + '__';
+            if (isLikelySafeMathExpression(match)) {
+                formulas.push(match.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+            } else {
+                formulas.push(escapeHtml(match));
+            }
+            return token;
+        });
+
+        var html = escapeHtml(tokenized);
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+        formulas.forEach(function (formula, idx) {
+            var token = '__NEKO_MATH_TOKEN_' + idx + '__';
+            html = html.split(token).join(formula);
+        });
+        return html.replace(/__NEKO_MATH_TOKEN_\d+__/g, '');
+    }
+
+    function renderRichBlocksHtml(text) {
+        var src = decodeEscapedLineBreaks(text);
+        var lines = src.split('\n');
+        var i = 0;
+        var out = [];
+
+        function isBlank(line) {
+            return !line || !line.trim();
+        }
+
+        while (i < lines.length) {
+            var line = lines[i] || '';
+            if (isBlank(line)) {
+                i += 1;
+                continue;
+            }
+
+            // fenced code block
+            if (/^\s*```/.test(line)) {
+                var codeLines = [];
+                i += 1;
+                while (i < lines.length && !/^\s*```/.test(lines[i] || '')) {
+                    codeLines.push(lines[i] || '');
+                    i += 1;
+                }
+                if (i < lines.length) i += 1;
+                out.push('<pre><code>' + escapeHtml(codeLines.join('\n')) + '</code></pre>');
+                continue;
+            }
+
+            // heading
+            var h = line.match(/^\s*(#{1,6})\s+(.*)$/);
+            if (h) {
+                var level = Math.min(6, h[1].length);
+                out.push('<h' + level + '>' + renderRichInlineHtml(h[2]) + '</h' + level + '>');
+                i += 1;
+                continue;
+            }
+
+            // blockquote
+            if (/^\s*>\s?/.test(line)) {
+                var q = [];
+                while (i < lines.length && /^\s*>\s?/.test(lines[i] || '')) {
+                    q.push((lines[i] || '').replace(/^\s*>\s?/, ''));
+                    i += 1;
+                }
+                out.push('<blockquote>' + renderRichInlineHtml(q.join('\n')).replace(/\n/g, '<br>') + '</blockquote>');
+                continue;
+            }
+
+            // unordered list
+            if (/^\s*[-*+]\s+/.test(line)) {
+                var ul = [];
+                while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i] || '')) {
+                    ul.push((lines[i] || '').replace(/^\s*[-*+]\s+/, ''));
+                    i += 1;
+                }
+                out.push('<ul>' + ul.map(function (item) { return '<li>' + renderRichInlineHtml(item) + '</li>'; }).join('') + '</ul>');
+                continue;
+            }
+
+            // ordered list
+            if (/^\s*\d+\.\s+/.test(line)) {
+                var ol = [];
+                while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i] || '')) {
+                    ol.push((lines[i] || '').replace(/^\s*\d+\.\s+/, ''));
+                    i += 1;
+                }
+                out.push('<ol>' + ol.map(function (item) { return '<li>' + renderRichInlineHtml(item) + '</li>'; }).join('') + '</ol>');
+                continue;
+            }
+
+            // horizontal rule
+            if (/^\s*(?:[-*_]\s*){3,}$/.test(line)) {
+                out.push('<hr>');
+                i += 1;
+                continue;
+            }
+
+            // paragraph (collect until blank or special block)
+            var p = [line];
+            i += 1;
+            while (i < lines.length) {
+                var next = lines[i] || '';
+                if (isBlank(next) || /^\s*```/.test(next) || /^\s*(#{1,6})\s+/.test(next) || /^\s*>\s?/.test(next)
+                    || /^\s*[-*+]\s+/.test(next) || /^\s*\d+\.\s+/.test(next) || /^\s*(?:[-*_]\s*){3,}$/.test(next)) {
+                    break;
+                }
+                p.push(next);
+                i += 1;
+            }
+            out.push('<p>' + renderRichInlineHtml(p.join('\n')).replace(/\n/g, '<br>') + '</p>');
+        }
+
+        return out.join('');
+    }
+
+    function hasMathToken(text) {
+        return /(\$\$[\s\S]+?\$\$|\$(?:\\.|[^$\\\n])+\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\])/.test(String(text || ''));
+    }
+
+    var _mathJaxReadyPromise = null;
+
+    function ensureMathJaxReady() {
+        if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+            return Promise.resolve(true);
+        }
+        if (_mathJaxReadyPromise) {
+            return _mathJaxReadyPromise;
+        }
+        _mathJaxReadyPromise = new Promise(function (resolve) {
+            try {
+                if (!window.MathJax) {
+                    window.MathJax = {
+                        loader: { load: ['[tex]/noerrors'] },
+                        tex: {
+                            inlineMath: [['$', '$'], ['\\(', '\\)']],
+                            displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                            packages: { '[+]': ['noerrors'] }
+                        },
+                        options: {
+                            skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+                        },
+                        svg: { fontCache: 'global' }
+                    };
+                }
+
+                var script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
+                script.async = true;
+                script.onload = function () { resolve(true); };
+                script.onerror = function () { resolve(false); };
+                document.head.appendChild(script);
+            } catch (_) {
+                resolve(false);
+            }
+        });
+        return _mathJaxReadyPromise;
+    }
+
+    function scheduleBubbleTypeset(bubble, rawText) {
+        if (!bubble || !hasMathToken(rawText)) return;
+        if (bubble._mathTypesetTimer) {
+            clearTimeout(bubble._mathTypesetTimer);
+        }
+        bubble._mathTypesetTimer = setTimeout(async function () {
+            if (!bubble.isConnected) return;
+            var ready = await ensureMathJaxReady();
+            if (!ready || !window.MathJax || typeof window.MathJax.typesetPromise !== 'function') return;
+            try {
+                await window.MathJax.typesetPromise([bubble]);
+                bubble.querySelectorAll('.mjx-merror, .MathJax_Error, mjx-container [data-mml-node="merror"]').forEach(function (node) {
+                    node.style.display = 'none';
+                });
+            } catch (_) {
+                // Keep plain source text when MathJax fails.
+            }
+        }, 100);
+    }
+
+    function renderGeminiBubbleHtml(messageDiv, text, timePrefix) {
+        if (!messageDiv) return;
+        var prefix = timePrefix || messageDiv.dataset.timePrefix || ('[' + getCurrentTimeString() + '] \u{1F380} ');
+        messageDiv.dataset.timePrefix = prefix;
+        messageDiv.innerHTML = '<span class="msg-prefix">' + escapeHtml(prefix) + '</span><div class="msg-rich">' + renderRichBlocksHtml(text) + '</div>';
+        scheduleBubbleTypeset(messageDiv, text);
+    }
+
     // ======================== 成就 ========================
 
     /**
@@ -60,7 +281,7 @@
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', 'gemini');
         const cleanSentence = (sentence || '').replace(/\[play_music:[^\]]*(\]|$)/g, '');
-        messageDiv.textContent = "[" + getCurrentTimeString() + "] \u{1F380} " + cleanSentence;
+        renderGeminiBubbleHtml(messageDiv, cleanSentence, "[" + getCurrentTimeString() + "] \u{1F380} ");
         chatContainer.appendChild(messageDiv);
         window.currentGeminiMessage = messageDiv;
 
@@ -359,7 +580,7 @@
         }
 
         function normalizeGeminiText(s) {
-            return (s || '').replace(/\r\n/g, '\n');
+            return decodeEscapedLineBreaks(s);
         }
 
         function cleanMusicFromChunk(rawText) {
@@ -495,7 +716,7 @@
             if (cleanNewText.trim()) {
                 var messageDiv = document.createElement('div');
                 messageDiv.classList.add('message', 'gemini');
-                messageDiv.textContent = "[" + getCurrentTimeString() + "] \u{1F380} " + cleanNewText;
+                renderGeminiBubbleHtml(messageDiv, cleanNewText, "[" + getCurrentTimeString() + "] \u{1F380} ");
 
                 chatContainer.appendChild(messageDiv);
                 window.currentGeminiMessage = messageDiv;
@@ -524,7 +745,7 @@
                 if (cleanText.trim()) {
                     var msgDiv = document.createElement('div');
                     msgDiv.classList.add('message', 'gemini');
-                    msgDiv.textContent = "[" + getCurrentTimeString() + "] \u{1F380} " + cleanText;
+                    renderGeminiBubbleHtml(msgDiv, cleanText, "[" + getCurrentTimeString() + "] \u{1F380} ");
                     chatContainer.appendChild(msgDiv);
 
                     window.currentGeminiMessage = msgDiv;
@@ -540,17 +761,8 @@
             // 场景 B: 气泡已存在，执行平滑追加
             else if (window.currentGeminiMessage && window.currentGeminiMessage.isConnected) {
                 var fullText = window._geminiTurnFullText.replace(/\[play_music:[^\]]*(\]|$)/g, '');
-
-
-                // var timePrefix = window.currentGeminiMessage.textContent.match(/^\[\d{2}:\d{2}:\d{2}\] \u{1F380} /) || [""];
-                // window.currentGeminiMessage.textContent = timePrefix[0] + fullText;
-                var timePrefix = window.currentGeminiMessage.textContent.match(/^\[\d{2}:\d{2}:\d{2}\] \u{1F380} /);
-                if (!timePrefix) {
-                    timePrefix = "[" + getCurrentTimeString() + "] \u{1F380} ";
-                } else {
-                    timePrefix = timePrefix[0];
-                }
-                window.currentGeminiMessage.textContent = timePrefix + fullText;
+                var timePrefix = window.currentGeminiMessage.dataset.timePrefix || ("[" + getCurrentTimeString() + "] \u{1F380} ");
+                renderGeminiBubbleHtml(window.currentGeminiMessage, fullText, timePrefix);
 
                 
                 // 触发字幕检测逻辑（防抖）
@@ -566,7 +778,7 @@
                         return;
                     }
 
-                    var currentFullText = window.currentGeminiMessage.textContent.replace(/^\[\d{2}:\d{2}:\d{2}\] \u{1F380} /, '');
+                    var currentFullText = (window._geminiTurnFullText || '').replace(/\[play_music:[^\]]*(\]|$)/g, '');
                     if (currentFullText && currentFullText.trim()) {
                         if (typeof userLanguage !== 'undefined' && userLanguage === null) {
                             getUserLanguage().then(function () {
@@ -595,7 +807,6 @@
             // 根据sender设置不同的图标
             var icon = sender === 'user' ? '\u{1F4AC}' : '\u{1F380}';
             var cleanedText = (text || '').replace(/\[play_music:[^\]]*(\]|$)/g, '');
-            newDiv.textContent = "[" + getCurrentTimeString() + "] " + icon + " " + cleanedText;
             chatContainer.appendChild(newDiv);
 
             // 如果是Gemini消息，更新当前消息引用
@@ -603,6 +814,8 @@
                 window.currentGeminiMessage = newDiv;
                 // ========== 追踪本轮气泡 ==========
                 window.currentTurnGeminiBubbles.push(newDiv);
+
+                renderGeminiBubbleHtml(newDiv, cleanedText, "[" + getCurrentTimeString() + "] \u{1F380} ");
 
                 // 检测AI消息的语言，如果与用户语言不同，显示字幕提示框
                 checkAndShowSubtitlePrompt(cleanedText);
@@ -613,6 +826,8 @@
                     console.log('\u68C0\u6D4B\u5230AI\u7B2C\u4E00\u6B21\u56DE\u590D');
                     checkAndUnlockFirstDialogueAchievement();
                 }
+            } else {
+                newDiv.textContent = "[" + getCurrentTimeString() + "] " + icon + " " + cleanedText;
             }
         }
         chatContainer.scrollTop = chatContainer.scrollHeight;

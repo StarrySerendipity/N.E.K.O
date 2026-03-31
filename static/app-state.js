@@ -19,6 +19,8 @@
         VOICE_TRANSCRIPT_MERGE_WINDOW: 3000, // 语音转录合并时间窗 (ms)
         SCREEN_IDLE_TIMEOUT: 5 * 60 * 1000, // 屏幕流闲置超时 (ms)
         SCREEN_CHECK_INTERVAL: 60 * 1000,    // 屏幕流检查间隔 (ms)
+        MAX_INCOMING_AUDIO_BLOBS: 120,       // 入站音频blob队列上限（防堆积）
+        MAX_PENDING_AUDIO_META: 240,         // 入站音频头信息队列上限（防堆积）
     });
 
     // ======================== 共享状态 ========================

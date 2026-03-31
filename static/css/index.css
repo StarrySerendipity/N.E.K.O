@@ -27,52 +27,34 @@ body {
     min-width: 280px;
     padding: 18px 24px;
     padding-left: 50px;
-    /* 为左上角的猫爪留出空间 */
-    /* 自定义背景图片 */
     background-image: url('/static/icons/toast_background.png');
-    /* 图片路径 */
     background-size: 100% 100%;
-    /* 强制拉伸到100%覆盖，避免边缘露出 */
     background-position: center;
-    /* 居中显示 */
     background-repeat: no-repeat;
-    /* 不重复 */
     background-origin: border-box;
-    /* 背景从边框区域开始 */
     background-clip: border-box;
-    /* 背景裁剪到边框区域 */
-    /* 如果图片加载失败，使用备用背景色 */
     background-color: transparent;
-    /* 移除备用背景色，避免白色边框 */
     color: #fff;
-    /* 纯白色文字 */
-    text-shadow: none;
-    /* 移除文字阴影 */
+    text-shadow: 0 1px 2px rgba(7, 29, 50, 0.55);
     border-radius: 12px;
     font-size: 18px;
-    /* 字体大小 */
-    font-weight: 500;
+    font-weight: 600;
     line-height: 1.6;
     box-shadow: none;
-    /* 移除阴影 */
     border: none;
-    /* 移除边框，避免白色边框问题 */
     overflow: hidden;
-    /* 确保背景图片不会超出圆角 */
     opacity: 0;
-    transform: translateY(-20px) scale(0.95);
-    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform: translateY(-20px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
     pointer-events: none;
-    /* 默认不响应事件 */
     overflow-wrap: break-word;
     white-space: pre-wrap;
     display: flex;
-    /* 使用flex布局 */
     align-items: center;
-    /* 垂直居中对齐 */
     visibility: visible;
-    /* 确保元素可见 */
     text-align: center;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 
@@ -82,45 +64,36 @@ body {
     content: '🐾';
     position: absolute;
     top: 50%;
-    /* 垂直居中 */
     left: 12px;
     transform: translateY(-50%);
-    /* 配合top: 50%实现垂直居中 */
     font-size: 50px;
-    /* 增大猫爪图标 */
     line-height: 1;
     opacity: 1;
     filter: brightness(0) invert(1);
-    /* 将emoji变成纯白色，移除阴影 */
     animation: pawBounce 1.5s ease-in-out infinite;
     z-index: 1;
-    /* 确保猫爪在遮罩层之上 */
 }
-/* 小猫爪爪弹跳动画 */
-@keyframes pawBounce {
 
+@keyframes pawBounce {
     0%,
     100% {
         transform: translateY(-50%) rotate(0deg);
-        /* 保持垂直居中 */
     }
 
     25% {
         transform: translateY(calc(-50% - 3px)) rotate(-5deg);
-        /* 保持垂直居中并添加动画 */
     }
 
     75% {
         transform: translateY(calc(-50% - 3px)) rotate(5deg);
-        /* 保持垂直居中并添加动画 */
     }
 }
 /* 显示状态提示气泡框 */
 #status-toast.show {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
     pointer-events: auto;
-    animation: slide-in-toast 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    animation: none;
 }
 /* 状态提示气泡框滑动入动画 */
 @keyframes slide-in-toast {
@@ -137,7 +110,7 @@ body {
 /* 状态提示气泡框滑动出动画 */
 #status-toast.hide {
     opacity: 0;
-    transform: translateY(-20px) scale(0.95);
+    transform: translateY(-20px);
     animation: none;
 }
 /* 移动端响应式设计 */
@@ -148,26 +121,20 @@ body {
         left: 10px;
         max-width: none;
         font-size: 17px;
-        /* 移动端字体大小 */
         padding: 16px 20px;
         padding-left: 45px;
-        /* 为左上角的猫爪留出空间 */
     }
-    /* 移动端猫爪图标位置调整 */
     #status-toast::before {
         top: 6px;
         left: 10px;
         font-size: 40px;
         transform: translateY(0);
-        /* 增大移动端猫爪图标 */
     }
-    /* 移动端状态提示气泡框滑动入动画 */
     #status-toast.show {
-        transform: translateY(0) scale(1);
+        transform: translateY(0);
     }
-    /* 移动端状态提示气泡框滑动出动画 */
     #status-toast.hide {
-        transform: translateY(-20px) scale(0.95);
+        transform: translateY(-20px);
     }
 }
 
@@ -667,8 +634,97 @@ button * {
     color: #333;
     margin-right: auto;
     border-bottom-left-radius: 4px;
+    white-space: normal;
+}
+
+.message .msg-prefix {
+    opacity: 0.82;
+    font-variant-numeric: tabular-nums;
+}
+
+.message .msg-rich {
     white-space: pre-wrap;
-    /* 保留换行，配合 textContent 使用避免 XSS 风险 */
+    word-break: break-word;
+}
+
+.message .msg-rich p {
+    margin: 0 0 8px 0;
+}
+
+.message .msg-rich p:last-child {
+    margin-bottom: 0;
+}
+
+.message .msg-rich h1,
+.message .msg-rich h2,
+.message .msg-rich h3,
+.message .msg-rich h4,
+.message .msg-rich h5,
+.message .msg-rich h6 {
+    margin: 8px 0 6px 0;
+    line-height: 1.35;
+    color: #1b5f8f;
+}
+
+.message .msg-rich h1 { font-size: 1.2em; }
+.message .msg-rich h2 { font-size: 1.12em; }
+.message .msg-rich h3 { font-size: 1.05em; }
+
+.message .msg-rich ul,
+.message .msg-rich ol {
+    margin: 4px 0 8px 22px;
+    padding: 0;
+}
+
+.message .msg-rich li {
+    margin: 2px 0;
+}
+
+.message .msg-rich blockquote {
+    margin: 6px 0;
+    padding: 6px 10px;
+    border-left: 3px solid rgba(16, 92, 144, 0.4);
+    background: rgba(16, 92, 144, 0.06);
+    border-radius: 4px;
+}
+
+.message .msg-rich pre {
+    margin: 6px 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(16, 92, 144, 0.1);
+    overflow-x: auto;
+}
+
+.message .msg-rich hr {
+    border: none;
+    border-top: 1px dashed rgba(16, 92, 144, 0.35);
+    margin: 8px 0;
+}
+
+.message .msg-rich code {
+    display: inline-block;
+    margin: 0 2px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(16, 92, 144, 0.12);
+    color: #215f90;
+    font-size: 0.9em;
+}
+
+.message .msg-rich a {
+    color: #127dbc;
+    text-decoration: underline;
+}
+
+.message .msg-rich mjx-container {
+    margin: 0 2px;
+}
+
+.message .msg-rich mjx-container[display="true"] {
+    display: block;
+    overflow-x: auto;
+    margin: 6px 0;
 }
 /* 聊天消息-动画-淡入 */
 @keyframes fadeIn {

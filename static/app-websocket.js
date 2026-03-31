@@ -401,6 +401,13 @@
                         shouldSkip: shouldSkip,
                         epoch: S.incomingAudioEpoch
                     });
+                    var maxPendingMeta = C.MAX_PENDING_AUDIO_META || 240;
+                    if (S.pendingAudioChunkMetaQueue.length > maxPendingMeta) {
+                        S.pendingAudioChunkMetaQueue.splice(0, S.pendingAudioChunkMetaQueue.length - maxPendingMeta);
+                        if (window.DEBUG_AUDIO) {
+                            console.warn('[Audio] pendingAudioChunkMetaQueue overflow, dropped oldest metadata');
+                        }
+                    }
                     S.skipNextAudioBlob = false;
 
                 // -------- cozy_audio --------

@@ -11,7 +11,7 @@ import logging
 import time
 import hashlib
 from typing import Dict, Any, Optional, ClassVar, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import httpx
 
 from fastapi import FastAPI, HTTPException
@@ -605,6 +605,8 @@ async def _emit_task_result(
     summary: str,
     detail: str = "",
     error_message: str = "",
+    plugin_id: str = "",
+    entry_id: str = "",
 ) -> None:
     """Emit a structured task_result event to main_server."""
     if success:
@@ -628,6 +630,8 @@ async def _emit_task_result(
         detail=detail[:_DETAIL_LIMIT] if detail else "",
         error_message=error_message[:_ERROR_LIMIT] if error_message else "",
         timestamp=_now_iso(),
+        plugin_id=plugin_id,
+        entry_id=entry_id,
     )
 
 
@@ -1264,6 +1268,8 @@ async def _do_analyze_and_plan(messages: list[dict[str, Any]], lanlan_name: Opti
                                         success=True,
                                         summary=summary[:500],
                                         detail=detail,
+                                        plugin_id=str(plugin_id or ""),
+                                        entry_id=str(entry_id or ""),
                                     )
                                 except Exception as emit_err:
                                     logger.debug("[TaskExecutor] emit task_result(success) failed: task_id=%s plugin_id=%s error=%s", up_result.task_id, plugin_id, emit_err)
@@ -1280,6 +1286,8 @@ async def _do_analyze_and_plan(messages: list[dict[str, Any]], lanlan_name: Opti
                                         success=False,
                                         summary=_fail_summary[:500],
                                         error_message=(detail or str(up_result.error or ""))[:500],
+                                        plugin_id=str(plugin_id or ""),
+                                        entry_id=str(entry_id or ""),
                                     )
                                 except Exception as emit_err:
                                     logger.debug("[TaskExecutor] emit task_result(failed) failed: task_id=%s plugin_id=%s error=%s", up_result.task_id, plugin_id, emit_err)
@@ -1309,6 +1317,8 @@ async def _do_analyze_and_plan(messages: list[dict[str, Any]], lanlan_name: Opti
                                 success=False,
                                 summary=_rp_phrase('plugin_cancelled', _rp_lang(None)),
                                 error_message=cancel_msg,
+                                plugin_id=str(plugin_id or ""),
+                                entry_id=str(entry_id or ""),
                             )
                         except Exception as emit_err:
                             logger.debug("[TaskExecutor] emit task_result(cancelled) failed: task_id=%s error=%s", result.task_id, emit_err)
@@ -1337,6 +1347,8 @@ async def _do_analyze_and_plan(messages: list[dict[str, Any]], lanlan_name: Opti
                                 success=False,
                                 summary='插件任务分发失败',
                                 error_message=str(e)[:500],
+                                plugin_id=str(plugin_id or ""),
+                                entry_id=str(entry_id or ""),
                             )
                         except Exception as emit_err:
                             logger.debug("[TaskExecutor] emit task_result(dispatch_failed) failed: task_id=%s error=%s", result.task_id, emit_err)

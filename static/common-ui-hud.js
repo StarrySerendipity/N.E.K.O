@@ -242,6 +242,23 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
             const KB_DOC_KEY = 'neko.kb.document_name';
             const KB_DOC_TOTAL_KEY = 'neko.kb.document_total';
             const KB_API_BASE = 'http://127.0.0.1:48916';
+            const AGENT_API_BASE = 'http://127.0.0.1:48915';
+            const KB_MANAGER_THEME = {
+                headerGradient: 'linear-gradient(to right, #4BD4FD, #17A7FF)',
+                panelGradient: 'linear-gradient(180deg, rgba(240,248,255,0.99), rgba(227,244,255,0.99))',
+                panelBorder: '#b3e5fc',
+                lineSoft: 'rgba(179, 229, 252, 0.85)',
+                linePrimary: 'rgba(64, 197, 241, 0.45)',
+                actionText: '#40C5F1',
+                actionFill: 'rgba(64, 197, 241, 0.16)',
+                actionFillHover: 'rgba(64, 197, 241, 0.24)',
+                danger: '#ff5252',
+                dangerHover: '#ff4444',
+                dangerActive: '#e53935',
+                dangerBg: 'rgba(255, 255, 255, 0.95)',
+                dangerBorder: 'rgba(255, 82, 82, 0.35)',
+                titleGlow: '#22b3ff'
+            };
 
             const kbState = {
                 enabled: localStorage.getItem(KB_MODE_KEY) === '1',
@@ -312,22 +329,8 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
                 transition: 'background 0.15s ease'
             });
 
-            const listBtn = document.createElement('div');
-            Object.assign(listBtn.style, {
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '5px 8px',
-                cursor: 'pointer',
-                borderRadius: '6px',
-                fontSize: '12px',
-                whiteSpace: 'nowrap',
-                color: 'var(--neko-popup-text, #333)',
-                transition: 'background 0.15s ease'
-            });
-
-            const deleteBtn = document.createElement('div');
-            Object.assign(deleteBtn.style, {
+            const manageBtn = document.createElement('div');
+            Object.assign(manageBtn.style, {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
@@ -345,7 +348,7 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
             uploadIcon.style.fontSize = '13px';
 
             const uploadLabel = document.createElement('span');
-            uploadLabel.textContent = '上传 Markdown';
+            uploadLabel.textContent = '上传文档';
             uploadLabel.style.userSelect = 'none';
 
             const uploadArrow = document.createElement('span');
@@ -358,41 +361,23 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
             uploadBtn.appendChild(uploadLabel);
             uploadBtn.appendChild(uploadArrow);
 
-            const listIcon = document.createElement('span');
-            listIcon.textContent = '≡';
-            listIcon.style.fontSize = '13px';
+            const manageIcon = document.createElement('span');
+            manageIcon.textContent = '▤';
+            manageIcon.style.fontSize = '13px';
 
-            const listLabel = document.createElement('span');
-            listLabel.textContent = '查看文档';
-            listLabel.style.userSelect = 'none';
+            const manageLabel = document.createElement('span');
+            manageLabel.textContent = '文档管理';
+            manageLabel.style.userSelect = 'none';
 
-            const listArrow = document.createElement('span');
-            listArrow.textContent = '↗';
-            listArrow.style.marginLeft = 'auto';
-            listArrow.style.opacity = '0.5';
-            listArrow.style.fontSize = '11px';
+            const manageArrow = document.createElement('span');
+            manageArrow.textContent = '↗';
+            manageArrow.style.marginLeft = 'auto';
+            manageArrow.style.opacity = '0.5';
+            manageArrow.style.fontSize = '11px';
 
-            listBtn.appendChild(listIcon);
-            listBtn.appendChild(listLabel);
-            listBtn.appendChild(listArrow);
-
-            const deleteIcon = document.createElement('span');
-            deleteIcon.textContent = '⌫';
-            deleteIcon.style.fontSize = '13px';
-
-            const deleteLabel = document.createElement('span');
-            deleteLabel.textContent = '删除文档';
-            deleteLabel.style.userSelect = 'none';
-
-            const deleteArrow = document.createElement('span');
-            deleteArrow.textContent = '↗';
-            deleteArrow.style.marginLeft = 'auto';
-            deleteArrow.style.opacity = '0.5';
-            deleteArrow.style.fontSize = '11px';
-
-            deleteBtn.appendChild(deleteIcon);
-            deleteBtn.appendChild(deleteLabel);
-            deleteBtn.appendChild(deleteArrow);
+            manageBtn.appendChild(manageIcon);
+            manageBtn.appendChild(manageLabel);
+            manageBtn.appendChild(manageArrow);
 
             uploadBtn.addEventListener('mouseenter', () => {
                 uploadBtn.style.background = 'var(--neko-popup-hover, rgba(68,183,254,0.1))';
@@ -401,18 +386,11 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
                 uploadBtn.style.background = 'transparent';
             });
 
-            listBtn.addEventListener('mouseenter', () => {
-                listBtn.style.background = 'var(--neko-popup-hover, rgba(68,183,254,0.1))';
+            manageBtn.addEventListener('mouseenter', () => {
+                manageBtn.style.background = 'var(--neko-popup-hover, rgba(68,183,254,0.1))';
             });
-            listBtn.addEventListener('mouseleave', () => {
-                listBtn.style.background = 'transparent';
-            });
-
-            deleteBtn.addEventListener('mouseenter', () => {
-                deleteBtn.style.background = 'var(--neko-popup-hover, rgba(68,183,254,0.1))';
-            });
-            deleteBtn.addEventListener('mouseleave', () => {
-                deleteBtn.style.background = 'transparent';
+            manageBtn.addEventListener('mouseleave', () => {
+                manageBtn.style.background = 'transparent';
             });
 
             const kbDocHint = document.createElement('div');
@@ -439,10 +417,82 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
 
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
-            fileInput.accept = '.md,.markdown,text/markdown,text/plain';
+            fileInput.accept = '*/*';
             fileInput.style.display = 'none';
 
+            let managerOverlay = null;
+            let managerPanel = null;
+            let managerRows = null;
+            let managerTitle = null;
+            let managerLoading = false;
+            let managerFoldersCache = [];
+            let managerDocsCache = [];
+            let managerCurrentFolder = '';
+            let managerFilterKeyword = '';
+            let managerSortBy = 'updated_desc';
+            let managerSearchInput = null;
+            let managerSortSelect = null;
+            let managerBreadcrumb = null;
+            let managerRenameFolderBtn = null;
+            let managerDeleteFolderBtn = null;
+            let managerInlineStatus = null;
+            let managerHudDisabledNodes = [];
+            let managerDragState = null;
+            let managerResizeState = null;
+            let managerMaximizedSnapshot = null;
+            let managerPreviewOverlay = null;
+            let managerPreviewPanel = null;
+            let managerPreviewDragState = null;
+            let managerPreviewResizeState = null;
+            let managerPreviewMaximizedSnapshot = null;
+            let managerPreviewTitle = null;
+            let managerPreviewBody = null;
+            let managerMathJaxReadyPromise = null;
+            const managerUploadInput = document.createElement('input');
+            managerUploadInput.type = 'file';
+            managerUploadInput.accept = '*/*';
+            managerUploadInput.style.display = 'none';
+            let kbPluginEnsureTs = 0;
+
+            async function ensureKnowledgeBasePluginReady() {
+                const now = Date.now();
+                if (now - kbPluginEnsureTs < 3000) {
+                    return;
+                }
+                kbPluginEnsureTs = now;
+
+                try {
+                    const flagsResp = await fetch(`${AGENT_API_BASE}/agent/flags`);
+                    if (flagsResp.ok) {
+                        const flagsData = await flagsResp.json();
+                        const enabled = !!(
+                            flagsData &&
+                            flagsData.agent_flags &&
+                            flagsData.agent_flags.user_plugin_enabled
+                        );
+                        if (enabled) {
+                            return;
+                        }
+                    }
+                } catch (_err) {
+                    // Continue and try best-effort enable below.
+                }
+
+                try {
+                    await fetch(`${AGENT_API_BASE}/agent/flags`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_plugin_enabled: true })
+                    });
+                    // Give embedded plugin lifecycle a short warm-up window.
+                    await new Promise((resolve) => setTimeout(resolve, 600));
+                } catch (_err) {
+                    // Keep runPluginEntry behavior unchanged; downstream call will surface concrete error.
+                }
+            }
+
             async function runPluginEntry(entryId, args) {
+                await ensureKnowledgeBasePluginReady();
                 const maxAttempts = 2;
                 for (let attempt = 0; attempt < maxAttempts; attempt++) {
                     const createResp = await fetch(`${KB_API_BASE}/runs`, {
@@ -468,9 +518,9 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
                     const started = Date.now();
                     const timeoutMs = 200000;
                     let runData = null;
+                    let pollDelayMs = 90;
 
                     while (Date.now() - started < timeoutMs) {
-                        await new Promise((resolve) => setTimeout(resolve, 800));
                         const runResp = await fetch(`${KB_API_BASE}/runs/${encodeURIComponent(runId)}`);
                         if (!runResp.ok) {
                             throw new Error(`查询任务失败 (${runResp.status})`);
@@ -478,6 +528,8 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
                         runData = await runResp.json();
                         const status = runData && runData.status;
                         if (status === 'queued' || status === 'running') {
+                            await new Promise((resolve) => setTimeout(resolve, pollDelayMs));
+                            pollDelayMs = Math.min(450, Math.floor(pollDelayMs * 1.4));
                             continue;
                         }
                         break;
@@ -491,6 +543,7 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
                         const errCode = runData.error && runData.error.code ? String(runData.error.code) : '';
                         const isRetryable = errCode === 'NOT_READY' && attempt + 1 < maxAttempts;
                         if (isRetryable) {
+                            await ensureKnowledgeBasePluginReady();
                             await new Promise((resolve) => setTimeout(resolve, 1200));
                             continue;
                         }
@@ -517,6 +570,2049 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
                 throw new Error('插件暂未就绪，请稍后重试');
             }
 
+            function ensureManagerDialog() {
+                if (managerOverlay) {
+                    return;
+                }
+
+                managerOverlay = document.createElement('div');
+                Object.assign(managerOverlay.style, {
+                    position: 'fixed',
+                    inset: '0',
+                    zIndex: '2147483000',
+                    background: 'rgba(20, 46, 70, 0.30)',
+                    display: 'none',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backdropFilter: 'blur(3px)',
+                    pointerEvents: 'auto'
+                });
+
+                const panel = document.createElement('div');
+                Object.assign(panel.style, {
+                    width: 'min(700px, 92vw)',
+                    height: 'min(78vh, 720px)',
+                    minWidth: '360px',
+                    minHeight: '280px',
+                    background: KB_MANAGER_THEME.panelGradient,
+                    border: `1px solid ${KB_MANAGER_THEME.linePrimary}`,
+                    borderRadius: '14px',
+                    boxShadow: '0 20px 48px rgba(10, 29, 52, 0.26)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    resize: 'none',
+                    position: 'fixed',
+                    left: '50%',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: '2147483001',
+                    pointerEvents: 'auto',
+                    willChange: 'left, top'
+                });
+                managerPanel = panel;
+
+                const managerExpandBtn = document.createElement('button');
+                managerExpandBtn.type = 'button';
+                managerExpandBtn.textContent = '⤢';
+                managerExpandBtn.title = '扩展窗口';
+                Object.assign(managerExpandBtn.style, {
+                    position: 'absolute',
+                    right: '10px',
+                    bottom: '10px',
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '999px',
+                    border: '1px solid rgba(255,255,255,0.62)',
+                    background: 'linear-gradient(180deg, #4BD4FD, #1E88E5)',
+                    color: '#ffffff',
+                    fontSize: '14px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    boxShadow: '0 6px 16px rgba(30, 136, 229, 0.38)',
+                    zIndex: '3'
+                });
+
+                const header = document.createElement('div');
+                Object.assign(header.style, {
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px 14px',
+                    background: KB_MANAGER_THEME.headerGradient,
+                    borderBottom: `1px solid ${KB_MANAGER_THEME.linePrimary}`,
+                    cursor: 'move',
+                    userSelect: 'none'
+                });
+
+                managerTitle = document.createElement('div');
+                managerTitle.textContent = '知识库文档管理';
+                Object.assign(managerTitle.style, {
+                    fontSize: '15px',
+                    fontWeight: '700',
+                    color: '#ffffff',
+                    textShadow: `0 1px 2px ${KB_MANAGER_THEME.titleGlow}`
+                });
+
+                const closeBtn = document.createElement('button');
+                closeBtn.type = 'button';
+                closeBtn.textContent = '关闭';
+                Object.assign(closeBtn.style, {
+                    border: '1px solid rgba(255,255,255,0.58)',
+                    background: 'rgba(255,255,255,0.24)',
+                    color: '#ffffff',
+                    borderRadius: '999px',
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '600'
+                });
+
+                const toolbar = document.createElement('div');
+                Object.assign(toolbar.style, {
+                    display: 'flex',
+                    gap: '8px',
+                    flexWrap: 'wrap',
+                    padding: '10px 14px',
+                    borderBottom: `1px dashed ${KB_MANAGER_THEME.linePrimary}`,
+                    background: 'rgba(255,255,255,0.75)'
+                });
+
+                const refreshBtn = document.createElement('button');
+                refreshBtn.type = 'button';
+                refreshBtn.textContent = '刷新列表';
+                const backFolderBtn = document.createElement('button');
+                backFolderBtn.type = 'button';
+                backFolderBtn.textContent = '返回文件夹';
+                const createFoldersBtn = document.createElement('button');
+                createFoldersBtn.type = 'button';
+                createFoldersBtn.textContent = '新建文件夹';
+                const renameFolderBtn = document.createElement('button');
+                renameFolderBtn.type = 'button';
+                renameFolderBtn.textContent = '重命名当前文件夹';
+                const deleteFolderBtn = document.createElement('button');
+                deleteFolderBtn.type = 'button';
+                deleteFolderBtn.textContent = '删除当前文件夹';
+                const uploadDocBtn = document.createElement('button');
+                uploadDocBtn.type = 'button';
+                uploadDocBtn.textContent = '上传文档';
+
+                [refreshBtn, backFolderBtn, createFoldersBtn, renameFolderBtn, deleteFolderBtn, uploadDocBtn].forEach((btn) => {
+                    Object.assign(btn.style, {
+                        border: `1px solid ${KB_MANAGER_THEME.lineSoft}`,
+                        background: `linear-gradient(180deg, ${KB_MANAGER_THEME.actionFill}, rgba(255,255,255,0.92))`,
+                        color: KB_MANAGER_THEME.actionText,
+                        borderRadius: '999px',
+                        padding: '5px 12px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: '600'
+                    });
+                });
+
+                Object.assign(deleteFolderBtn.style, {
+                    color: '#c62828',
+                    border: '1px solid rgba(244, 67, 54, 0.25)',
+                    background: 'linear-gradient(180deg, rgba(244,67,54,0.10), rgba(255,255,255,0.92))'
+                });
+
+                managerSearchInput = document.createElement('input');
+                managerSearchInput.type = 'text';
+                managerSearchInput.placeholder = '搜索文档名...';
+                Object.assign(managerSearchInput.style, {
+                    flex: '1',
+                    minWidth: '180px',
+                    border: `1px solid ${KB_MANAGER_THEME.lineSoft}`,
+                    background: 'rgba(255,255,255,0.9)',
+                    color: 'var(--neko-popup-text, #333)',
+                    borderRadius: '999px',
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    outline: 'none'
+                });
+
+                managerSortSelect = document.createElement('select');
+                [
+                    { value: 'updated_desc', text: '最近更新' },
+                    { value: 'updated_asc', text: '最早更新' },
+                    { value: 'name_asc', text: '名称 A-Z' },
+                    { value: 'name_desc', text: '名称 Z-A' },
+                    { value: 'chunk_desc', text: '分块数 从多到少' },
+                    { value: 'chunk_asc', text: '分块数 从少到多' }
+                ].forEach((opt) => {
+                    const option = document.createElement('option');
+                    option.value = opt.value;
+                    option.textContent = opt.text;
+                    managerSortSelect.appendChild(option);
+                });
+                Object.assign(managerSortSelect.style, {
+                    border: `1px solid ${KB_MANAGER_THEME.lineSoft}`,
+                    background: 'rgba(255,255,255,0.9)',
+                    color: 'var(--neko-popup-text, #333)',
+                    borderRadius: '999px',
+                    padding: '5px 10px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    minWidth: '130px',
+                    outline: 'none'
+                });
+
+                managerBreadcrumb = document.createElement('div');
+                Object.assign(managerBreadcrumb.style, {
+                    padding: '6px 14px 4px 14px',
+                    fontSize: '12px',
+                    color: KB_MANAGER_THEME.actionText,
+                    opacity: '0.95',
+                    borderBottom: `1px dashed ${KB_MANAGER_THEME.lineSoft}`,
+                    background: 'rgba(255,255,255,0.6)'
+                });
+
+                managerInlineStatus = document.createElement('div');
+                managerInlineStatus.textContent = '';
+                Object.assign(managerInlineStatus.style, {
+                    display: 'none',
+                    margin: '6px 14px 0 14px',
+                    padding: '6px 10px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    background: 'rgba(30, 136, 229, 0.92)',
+                    color: '#ffffff',
+                    border: '1px solid rgba(255,255,255,0.35)'
+                });
+
+                managerRows = document.createElement('div');
+                Object.assign(managerRows.style, {
+                    padding: '8px 10px 12px 10px',
+                    overflowY: 'auto',
+                    minHeight: '120px',
+                    flex: '1'
+                });
+
+                const tip = document.createElement('div');
+                tip.textContent = '提示: 支持层级文件夹管理。可新建/重命名目录，并将文档或子目录拖拽到目标目录。';
+                Object.assign(tip.style, {
+                    fontSize: '11px',
+                    opacity: '0.72',
+                    padding: '8px 14px 12px 14px',
+                    lineHeight: '1.45'
+                });
+
+                function setHudOverlayInteractivity(disabled) {
+                    const targets = document.querySelectorAll(
+                        '[id$="-floating-buttons"], [id$="-lock-icon"], [id$="-return-button-container"], #agent-task-hud'
+                    );
+
+                    if (disabled) {
+                        managerHudDisabledNodes = [];
+                        targets.forEach((node) => {
+                            if (!node || node === managerOverlay || node.contains(managerOverlay)) {
+                                return;
+                            }
+                            managerHudDisabledNodes.push({
+                                node,
+                                pointerEvents: node.style.pointerEvents,
+                                opacity: node.style.opacity
+                            });
+                            node.style.pointerEvents = 'none';
+                            if (!node.style.opacity) {
+                                node.style.opacity = '0.86';
+                            }
+                        });
+                        return;
+                    }
+
+                    managerHudDisabledNodes.forEach((item) => {
+                        if (!item || !item.node) {
+                            return;
+                        }
+                        item.node.style.pointerEvents = item.pointerEvents || '';
+                        item.node.style.opacity = item.opacity || '';
+                    });
+                    managerHudDisabledNodes = [];
+                }
+
+                function closeManager() {
+                    managerOverlay.style.display = 'none';
+                    setManagerInlineStatus('');
+                    setHudOverlayInteractivity(false);
+                }
+
+                function clampManagerPanelPosition(left, top) {
+                    if (!managerPanel) {
+                        return { left, top };
+                    }
+                    const rect = managerPanel.getBoundingClientRect();
+                    // Allow panel to be dragged partially off-screen, but keep a visible grab area.
+                    const minVisibleX = 96;
+                    const minVisibleY = 56;
+                    const minLeft = Math.min(0, minVisibleX - rect.width);
+                    const maxLeft = Math.max(0, window.innerWidth - minVisibleX);
+                    const minTop = Math.min(0, minVisibleY - rect.height);
+                    const maxTop = Math.max(0, window.innerHeight - minVisibleY);
+                    return {
+                        left: Math.min(Math.max(minLeft, left), maxLeft),
+                        top: Math.min(Math.max(minTop, top), maxTop)
+                    };
+                }
+
+                function getManagerResizeEdge(ev) {
+                    if (!managerPanel) {
+                        return null;
+                    }
+                    const rect = managerPanel.getBoundingClientRect();
+                    const edge = 8;
+                    const onLeft = ev.clientX >= rect.left && ev.clientX <= rect.left + edge;
+                    const onRight = ev.clientX <= rect.right && ev.clientX >= rect.right - edge;
+                    const onTop = ev.clientY >= rect.top && ev.clientY <= rect.top + edge;
+                    const onBottom = ev.clientY <= rect.bottom && ev.clientY >= rect.bottom - edge;
+                    if (!(onLeft || onRight || onTop || onBottom)) {
+                        return null;
+                    }
+                    return { left: onLeft, right: onRight, top: onTop, bottom: onBottom };
+                }
+
+                function managerResizeCursor(edge) {
+                    if (!edge) {
+                        return 'default';
+                    }
+                    if ((edge.left && edge.top) || (edge.right && edge.bottom)) {
+                        return 'nwse-resize';
+                    }
+                    if ((edge.right && edge.top) || (edge.left && edge.bottom)) {
+                        return 'nesw-resize';
+                    }
+                    if (edge.left || edge.right) {
+                        return 'ew-resize';
+                    }
+                    return 'ns-resize';
+                }
+
+                function isManagerInteractiveTarget(target) {
+                    if (!target || !(target instanceof Element)) {
+                        return false;
+                    }
+                    return !!target.closest('button, input, textarea, select, a, summary, iframe, [contenteditable="true"], [draggable="true"]');
+                }
+
+                function toggleManagerPanelMaximize() {
+                    if (!managerPanel) {
+                        return;
+                    }
+                    if (!managerMaximizedSnapshot) {
+                        const rect = managerPanel.getBoundingClientRect();
+                        managerMaximizedSnapshot = {
+                            left: managerPanel.style.left,
+                            top: managerPanel.style.top,
+                            width: managerPanel.style.width,
+                            height: managerPanel.style.height,
+                            transform: managerPanel.style.transform,
+                            rectLeft: rect.left,
+                            rectTop: rect.top,
+                            rectWidth: rect.width,
+                            rectHeight: rect.height
+                        };
+                        const pad = 14;
+                        managerPanel.style.transform = 'none';
+                        managerPanel.style.left = `${pad}px`;
+                        managerPanel.style.top = `${pad}px`;
+                        managerPanel.style.width = `${Math.max(360, window.innerWidth - pad * 2)}px`;
+                        managerPanel.style.height = `${Math.max(280, window.innerHeight - pad * 2)}px`;
+                        managerExpandBtn.textContent = '🗗';
+                        managerExpandBtn.title = '还原窗口';
+                        return;
+                    }
+                    const snapshot = managerMaximizedSnapshot;
+                    managerMaximizedSnapshot = null;
+                    managerPanel.style.transform = snapshot.transform || 'none';
+                    managerPanel.style.left = snapshot.left || `${snapshot.rectLeft}px`;
+                    managerPanel.style.top = snapshot.top || `${snapshot.rectTop}px`;
+                    managerPanel.style.width = snapshot.width || `${snapshot.rectWidth}px`;
+                    managerPanel.style.height = snapshot.height || `${snapshot.rectHeight}px`;
+                    managerExpandBtn.textContent = '⤢';
+                    managerExpandBtn.title = '扩展窗口';
+                }
+
+                function startManagerDrag(ev) {
+                    if (ev.button !== 0 || !managerPanel) {
+                        return;
+                    }
+                    const resizeEdge = getManagerResizeEdge(ev);
+                    if (resizeEdge) {
+                        const rect = managerPanel.getBoundingClientRect();
+                        managerPanel.style.transform = 'none';
+                        managerPanel.style.left = `${rect.left}px`;
+                        managerPanel.style.top = `${rect.top}px`;
+                        managerResizeState = {
+                            edge: resizeEdge,
+                            startX: ev.clientX,
+                            startY: ev.clientY,
+                            startLeft: rect.left,
+                            startTop: rect.top,
+                            startWidth: rect.width,
+                            startHeight: rect.height
+                        };
+                        managerMaximizedSnapshot = null;
+                        managerExpandBtn.textContent = '⤢';
+                        managerExpandBtn.title = '扩展窗口';
+                        document.body.style.userSelect = 'none';
+                        ev.preventDefault();
+                        return;
+                    }
+                    if (ev.target === closeBtn || closeBtn.contains(ev.target)) {
+                        return;
+                    }
+                    if (isManagerInteractiveTarget(ev.target)) {
+                        return;
+                    }
+                    const rect = managerPanel.getBoundingClientRect();
+                    managerPanel.style.transform = 'none';
+                    managerPanel.style.left = `${rect.left}px`;
+                    managerPanel.style.top = `${rect.top}px`;
+                    managerDragState = {
+                        offsetX: ev.clientX - rect.left,
+                        offsetY: ev.clientY - rect.top
+                    };
+                    document.body.style.userSelect = 'none';
+                    ev.preventDefault();
+                }
+
+                function moveManagerDrag(ev) {
+                    if (managerResizeState && managerPanel) {
+                        const minW = 360;
+                        const minH = 280;
+                        const dx = ev.clientX - managerResizeState.startX;
+                        const dy = ev.clientY - managerResizeState.startY;
+                        let nextLeft = managerResizeState.startLeft;
+                        let nextTop = managerResizeState.startTop;
+                        let nextWidth = managerResizeState.startWidth;
+                        let nextHeight = managerResizeState.startHeight;
+
+                        if (managerResizeState.edge.right) {
+                            nextWidth = Math.max(minW, managerResizeState.startWidth + dx);
+                        }
+                        if (managerResizeState.edge.bottom) {
+                            nextHeight = Math.max(minH, managerResizeState.startHeight + dy);
+                        }
+                        if (managerResizeState.edge.left) {
+                            const rawWidth = managerResizeState.startWidth - dx;
+                            nextWidth = Math.max(minW, rawWidth);
+                            nextLeft = managerResizeState.startLeft + (managerResizeState.startWidth - nextWidth);
+                        }
+                        if (managerResizeState.edge.top) {
+                            const rawHeight = managerResizeState.startHeight - dy;
+                            nextHeight = Math.max(minH, rawHeight);
+                            nextTop = managerResizeState.startTop + (managerResizeState.startHeight - nextHeight);
+                        }
+
+                        managerPanel.style.left = `${nextLeft}px`;
+                        managerPanel.style.top = `${nextTop}px`;
+                        managerPanel.style.width = `${nextWidth}px`;
+                        managerPanel.style.height = `${nextHeight}px`;
+                        managerPanel.style.transform = 'none';
+                        return;
+                    }
+                    if (!managerDragState || !managerPanel) {
+                        return;
+                    }
+                    const nextLeft = ev.clientX - managerDragState.offsetX;
+                    const nextTop = ev.clientY - managerDragState.offsetY;
+                    const clamped = clampManagerPanelPosition(nextLeft, nextTop);
+                    managerPanel.style.left = `${clamped.left}px`;
+                    managerPanel.style.top = `${clamped.top}px`;
+                    managerPanel.style.transform = 'none';
+                }
+
+                function endManagerDrag() {
+                    managerDragState = null;
+                    managerResizeState = null;
+                    document.body.style.userSelect = '';
+                    if (managerPanel) {
+                        managerPanel.style.cursor = 'default';
+                    }
+                }
+
+                managerOverlay.addEventListener('click', (ev) => {
+                    if (ev.target === managerOverlay) {
+                        closeManager();
+                    }
+                });
+
+                closeBtn.addEventListener('click', closeManager);
+                panel.addEventListener('mousedown', startManagerDrag);
+                panel.addEventListener('mousemove', (ev) => {
+                    if (managerDragState || managerResizeState || !managerPanel) {
+                        return;
+                    }
+                    const edge = getManagerResizeEdge(ev);
+                    managerPanel.style.cursor = edge ? managerResizeCursor(edge) : 'default';
+                });
+                managerExpandBtn.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    toggleManagerPanelMaximize();
+                });
+                managerExpandBtn.addEventListener('mouseenter', () => {
+                    managerExpandBtn.style.filter = 'brightness(1.06)';
+                });
+                managerExpandBtn.addEventListener('mouseleave', () => {
+                    managerExpandBtn.style.filter = 'none';
+                });
+                window.addEventListener('mousemove', moveManagerDrag);
+                window.addEventListener('mouseup', endManagerDrag);
+                window.addEventListener('resize', () => {
+                    if (managerMaximizedSnapshot && managerPanel) {
+                        const pad = 14;
+                        managerPanel.style.left = `${pad}px`;
+                        managerPanel.style.top = `${pad}px`;
+                        managerPanel.style.width = `${Math.max(360, window.innerWidth - pad * 2)}px`;
+                        managerPanel.style.height = `${Math.max(280, window.innerHeight - pad * 2)}px`;
+                    }
+                });
+                closeBtn.addEventListener('mouseenter', () => {
+                    closeBtn.style.background = 'rgba(255,255,255,0.34)';
+                });
+                closeBtn.addEventListener('mouseleave', () => {
+                    closeBtn.style.background = 'rgba(255,255,255,0.24)';
+                });
+                refreshBtn.addEventListener('click', () => {
+                    loadManagerDocuments();
+                });
+                backFolderBtn.addEventListener('click', async () => {
+                    managerCurrentFolder = '';
+                    managerFilterKeyword = '';
+                    if (managerSearchInput) {
+                        managerSearchInput.value = '';
+                    }
+                    await loadManagerDocuments();
+                });
+                createFoldersBtn.addEventListener('click', async () => {
+                    const inputName = window.prompt('请输入新文件夹名称', '新文件夹');
+                    if (inputName === null) {
+                        return;
+                    }
+                    const folderName = String(inputName || '').trim();
+                    if (!folderName) {
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast('文件夹名称不能为空', 2600);
+                        }
+                        return;
+                    }
+                    try {
+                        const result = await runPluginEntry('create_folder', {
+                            folder_name: folderName,
+                            parent_folder: managerCurrentFolder || ''
+                        });
+                        const data = result && result.data ? result.data : null;
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(data && data.message ? String(data.message) : '文件夹已创建', 2600);
+                        }
+                        await loadManagerDocuments();
+                    } catch (err) {
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(`创建文件夹失败: ${err && err.message ? err.message : err}`, 4200);
+                        }
+                    }
+                });
+                renameFolderBtn.addEventListener('click', async () => {
+                    if (!managerCurrentFolder) {
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast('请先进入要重命名的目录', 2600);
+                        }
+                        return;
+                    }
+                    const segments = String(managerCurrentFolder).split('/');
+                    const currentName = segments[segments.length - 1] || managerCurrentFolder;
+                    const newNameInput = window.prompt('请输入新文件夹名称', currentName);
+                    if (newNameInput === null) {
+                        return;
+                    }
+                    const newName = String(newNameInput || '').trim();
+                    if (!newName) {
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast('文件夹名称不能为空', 2600);
+                        }
+                        return;
+                    }
+                    try {
+                        const result = await runPluginEntry('rename_folder', {
+                            folder_path: managerCurrentFolder,
+                            new_name: newName
+                        });
+                        const data = result && result.data ? result.data : null;
+                        if (data && data.renamed && data.new_folder_path) {
+                            managerCurrentFolder = String(data.new_folder_path);
+                        }
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(data && data.message ? String(data.message) : '目录重命名完成', 2800);
+                        }
+                        await loadManagerDocuments();
+                    } catch (err) {
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(`重命名目录失败: ${err && err.message ? err.message : err}`, 4200);
+                        }
+                    }
+                });
+                deleteFolderBtn.addEventListener('click', async () => {
+                    if (!managerCurrentFolder) {
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast('请先进入要删除的目录', 2600);
+                        }
+                        return;
+                    }
+                    const ok = window.confirm(`确认删除目录及其内部文档: ${managerCurrentFolder} ?`);
+                    if (!ok) {
+                        return;
+                    }
+                    try {
+                        const result = await runPluginEntry('delete_folder', {
+                            folder_path: managerCurrentFolder
+                        });
+                        const data = result && result.data ? result.data : null;
+                        managerCurrentFolder = '';
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(data && data.message ? String(data.message) : '目录删除完成', 3200);
+                        }
+                        await loadManagerDocuments();
+                    } catch (err) {
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(`删除目录失败: ${err && err.message ? err.message : err}`, 4200);
+                        }
+                    }
+                });
+                uploadDocBtn.addEventListener('click', () => {
+                    managerUploadInput.click();
+                });
+                [refreshBtn, backFolderBtn, createFoldersBtn, renameFolderBtn, deleteFolderBtn, uploadDocBtn].forEach((btn) => {
+                    btn.addEventListener('mouseenter', () => {
+                        btn.style.background = `linear-gradient(180deg, ${KB_MANAGER_THEME.actionFillHover}, rgba(255,255,255,0.94))`;
+                    });
+                    btn.addEventListener('mouseleave', () => {
+                        if (btn === deleteFolderBtn) {
+                            btn.style.background = 'linear-gradient(180deg, rgba(244,67,54,0.10), rgba(255,255,255,0.92))';
+                        } else {
+                            btn.style.background = `linear-gradient(180deg, ${KB_MANAGER_THEME.actionFill}, rgba(255,255,255,0.92))`;
+                        }
+                    });
+                });
+                managerSearchInput.addEventListener('input', () => {
+                    managerFilterKeyword = String(managerSearchInput.value || '').trim().toLowerCase();
+                    applyManagerDocsView();
+                });
+                managerSortSelect.addEventListener('change', () => {
+                    managerSortBy = String(managerSortSelect.value || 'updated_desc');
+                    applyManagerDocsView();
+                });
+
+                header.appendChild(managerTitle);
+                header.appendChild(closeBtn);
+                toolbar.appendChild(refreshBtn);
+                toolbar.appendChild(backFolderBtn);
+                toolbar.appendChild(createFoldersBtn);
+                toolbar.appendChild(renameFolderBtn);
+                toolbar.appendChild(deleteFolderBtn);
+                toolbar.appendChild(uploadDocBtn);
+                toolbar.appendChild(managerSearchInput);
+                toolbar.appendChild(managerSortSelect);
+                panel.appendChild(header);
+                panel.appendChild(toolbar);
+                panel.appendChild(managerInlineStatus);
+                panel.appendChild(managerBreadcrumb);
+                panel.appendChild(managerRows);
+                panel.appendChild(tip);
+                panel.appendChild(managerExpandBtn);
+                managerOverlay.appendChild(panel);
+                document.body.appendChild(managerOverlay);
+                managerOverlay._setHudOverlayInteractivity = setHudOverlayInteractivity;
+                managerRenameFolderBtn = renameFolderBtn;
+                managerDeleteFolderBtn = deleteFolderBtn;
+            }
+
+            function _toUpdatedTimestamp(item) {
+                const raw = item && item.updated_at ? String(item.updated_at) : '';
+                if (!raw) {
+                    return 0;
+                }
+                const t = Date.parse(raw);
+                return Number.isFinite(t) ? t : 0;
+            }
+
+            function _formatUpdatedAt(raw) {
+                if (!raw) {
+                    return '';
+                }
+                return String(raw).replace('T', ' ').slice(0, 19);
+            }
+
+            function normalizeManagerFolderPath(pathText) {
+                return String(pathText || '')
+                    .replace(/\\/g, '/')
+                    .split('/')
+                    .map((segment) => String(segment || '').trim())
+                    .filter((segment) => !!segment && segment !== '.' && segment !== '..')
+                    .join('/');
+            }
+
+            function setManagerInlineStatus(message, isError = false) {
+                if (!managerInlineStatus) {
+                    return;
+                }
+                const text = String(message || '').trim();
+                if (!text) {
+                    managerInlineStatus.style.display = 'none';
+                    managerInlineStatus.textContent = '';
+                    return;
+                }
+                managerInlineStatus.style.display = 'block';
+                managerInlineStatus.textContent = text;
+                managerInlineStatus.style.background = isError ? 'rgba(229, 57, 53, 0.94)' : 'rgba(30, 136, 229, 0.92)';
+            }
+
+            function updateManagerBreadcrumb() {
+                if (!managerBreadcrumb) {
+                    return;
+                }
+                if (!managerCurrentFolder) {
+                    managerBreadcrumb.textContent = '当前位置: 文档文件夹';
+                    if (managerSearchInput) {
+                        managerSearchInput.placeholder = '搜索文件夹名...';
+                    }
+                    if (managerRenameFolderBtn) {
+                        managerRenameFolderBtn.disabled = true;
+                        managerRenameFolderBtn.style.opacity = '0.55';
+                        managerRenameFolderBtn.style.cursor = 'not-allowed';
+                    }
+                    if (managerDeleteFolderBtn) {
+                        managerDeleteFolderBtn.disabled = true;
+                        managerDeleteFolderBtn.style.opacity = '0.55';
+                        managerDeleteFolderBtn.style.cursor = 'not-allowed';
+                    }
+                    return;
+                }
+                managerBreadcrumb.textContent = `当前位置: 文档文件夹 / ${managerCurrentFolder}`;
+                if (managerSearchInput) {
+                    managerSearchInput.placeholder = '搜索文档名...';
+                }
+                if (managerRenameFolderBtn) {
+                    managerRenameFolderBtn.disabled = false;
+                    managerRenameFolderBtn.style.opacity = '1';
+                    managerRenameFolderBtn.style.cursor = 'pointer';
+                }
+                if (managerDeleteFolderBtn) {
+                    managerDeleteFolderBtn.disabled = false;
+                    managerDeleteFolderBtn.style.opacity = '1';
+                    managerDeleteFolderBtn.style.cursor = 'pointer';
+                }
+            }
+
+            function ensurePreviewDialog() {
+                if (managerPreviewOverlay) {
+                    return;
+                }
+                managerPreviewOverlay = document.createElement('div');
+                Object.assign(managerPreviewOverlay.style, {
+                    position: 'fixed',
+                    inset: '0',
+                    zIndex: '2147483100',
+                    background: 'rgba(10, 24, 38, 0.42)',
+                    display: 'none',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backdropFilter: 'blur(2px)',
+                    pointerEvents: 'auto'
+                });
+
+                const panel = document.createElement('div');
+                Object.assign(panel.style, {
+                    width: 'min(900px, 94vw)',
+                    height: 'min(82vh, 760px)',
+                    minWidth: '380px',
+                    minHeight: '260px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    borderRadius: '14px',
+                    overflow: 'hidden',
+                    resize: 'none',
+                    border: `1px solid ${KB_MANAGER_THEME.linePrimary}`,
+                    background: 'linear-gradient(180deg, rgba(248,252,255,0.98), rgba(236,247,255,0.98))',
+                    boxShadow: '0 18px 42px rgba(7, 29, 50, 0.35)',
+                    pointerEvents: 'auto',
+                    position: 'fixed',
+                    left: '50%',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)'
+                });
+                managerPreviewPanel = panel;
+
+                const previewExpandBtn = document.createElement('button');
+                previewExpandBtn.type = 'button';
+                previewExpandBtn.textContent = '⤢';
+                previewExpandBtn.title = '扩展窗口';
+                Object.assign(previewExpandBtn.style, {
+                    position: 'absolute',
+                    right: '10px',
+                    bottom: '10px',
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '999px',
+                    border: '1px solid rgba(255,255,255,0.62)',
+                    background: 'linear-gradient(180deg, #4BD4FD, #1E88E5)',
+                    color: '#ffffff',
+                    fontSize: '14px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    boxShadow: '0 6px 16px rgba(30, 136, 229, 0.38)',
+                    zIndex: '3'
+                });
+
+                const header = document.createElement('div');
+                Object.assign(header.style, {
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    background: KB_MANAGER_THEME.headerGradient,
+                    color: '#fff',
+                    userSelect: 'none',
+                    cursor: 'move'
+                });
+
+                managerPreviewTitle = document.createElement('div');
+                managerPreviewTitle.textContent = '文档预览';
+                Object.assign(managerPreviewTitle.style, {
+                    fontSize: '14px',
+                    fontWeight: '700'
+                });
+
+                const closeBtn = document.createElement('button');
+                closeBtn.type = 'button';
+                closeBtn.textContent = '关闭';
+                Object.assign(closeBtn.style, {
+                    border: '1px solid rgba(255,255,255,0.58)',
+                    background: 'rgba(255,255,255,0.22)',
+                    color: '#fff',
+                    borderRadius: '999px',
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '600'
+                });
+
+                managerPreviewBody = document.createElement('div');
+                Object.assign(managerPreviewBody.style, {
+                    margin: '0',
+                    padding: '14px',
+                    overflow: 'auto',
+                    fontSize: '12px',
+                    lineHeight: '1.5',
+                    color: '#214767',
+                    background: 'rgba(255,255,255,0.9)',
+                    minHeight: '120px',
+                    flex: '1',
+                    pointerEvents: 'auto'
+                });
+
+                function isPreviewInteractiveTarget(target) {
+                    if (!target || !(target instanceof Element)) {
+                        return false;
+                    }
+                    return !!target.closest('button, input, textarea, select, a, summary, iframe, [contenteditable="true"], [draggable="true"]');
+                }
+
+                function getPreviewResizeEdge(ev) {
+                    if (!managerPreviewPanel) {
+                        return null;
+                    }
+                    const rect = managerPreviewPanel.getBoundingClientRect();
+                    const edge = 8;
+                    const onLeft = ev.clientX >= rect.left && ev.clientX <= rect.left + edge;
+                    const onRight = ev.clientX <= rect.right && ev.clientX >= rect.right - edge;
+                    const onTop = ev.clientY >= rect.top && ev.clientY <= rect.top + edge;
+                    const onBottom = ev.clientY <= rect.bottom && ev.clientY >= rect.bottom - edge;
+                    if (!(onLeft || onRight || onTop || onBottom)) {
+                        return null;
+                    }
+                    return { left: onLeft, right: onRight, top: onTop, bottom: onBottom };
+                }
+
+                function previewResizeCursor(edge) {
+                    if (!edge) {
+                        return 'default';
+                    }
+                    if ((edge.left && edge.top) || (edge.right && edge.bottom)) {
+                        return 'nwse-resize';
+                    }
+                    if ((edge.right && edge.top) || (edge.left && edge.bottom)) {
+                        return 'nesw-resize';
+                    }
+                    if (edge.left || edge.right) {
+                        return 'ew-resize';
+                    }
+                    return 'ns-resize';
+                }
+
+                function togglePreviewPanelMaximize() {
+                    if (!managerPreviewPanel) {
+                        return;
+                    }
+                    if (!managerPreviewMaximizedSnapshot) {
+                        const rect = managerPreviewPanel.getBoundingClientRect();
+                        managerPreviewMaximizedSnapshot = {
+                            left: managerPreviewPanel.style.left,
+                            top: managerPreviewPanel.style.top,
+                            width: managerPreviewPanel.style.width,
+                            height: managerPreviewPanel.style.height,
+                            transform: managerPreviewPanel.style.transform,
+                            rectLeft: rect.left,
+                            rectTop: rect.top,
+                            rectWidth: rect.width,
+                            rectHeight: rect.height
+                        };
+                        const pad = 16;
+                        managerPreviewPanel.style.transform = 'none';
+                        managerPreviewPanel.style.left = `${pad}px`;
+                        managerPreviewPanel.style.top = `${pad}px`;
+                        managerPreviewPanel.style.width = `${Math.max(380, window.innerWidth - pad * 2)}px`;
+                        managerPreviewPanel.style.height = `${Math.max(260, window.innerHeight - pad * 2)}px`;
+                        previewExpandBtn.textContent = '🗗';
+                        previewExpandBtn.title = '还原窗口';
+                        return;
+                    }
+                    const snapshot = managerPreviewMaximizedSnapshot;
+                    managerPreviewMaximizedSnapshot = null;
+                    managerPreviewPanel.style.transform = snapshot.transform || 'none';
+                    managerPreviewPanel.style.left = snapshot.left || `${snapshot.rectLeft}px`;
+                    managerPreviewPanel.style.top = snapshot.top || `${snapshot.rectTop}px`;
+                    managerPreviewPanel.style.width = snapshot.width || `${snapshot.rectWidth}px`;
+                    managerPreviewPanel.style.height = snapshot.height || `${snapshot.rectHeight}px`;
+                    previewExpandBtn.textContent = '⤢';
+                    previewExpandBtn.title = '扩展窗口';
+                }
+
+                function endPreviewDrag() {
+                    managerPreviewDragState = null;
+                    managerPreviewResizeState = null;
+                    document.body.style.userSelect = '';
+                    if (managerPreviewPanel) {
+                        managerPreviewPanel.style.cursor = 'default';
+                    }
+                }
+
+                function startPreviewDrag(ev) {
+                    if (ev.button !== 0 || !managerPreviewPanel) {
+                        return;
+                    }
+                    const resizeEdge = getPreviewResizeEdge(ev);
+                    if (resizeEdge) {
+                        const rect = managerPreviewPanel.getBoundingClientRect();
+                        managerPreviewPanel.style.transform = 'none';
+                        managerPreviewPanel.style.left = `${rect.left}px`;
+                        managerPreviewPanel.style.top = `${rect.top}px`;
+                        managerPreviewResizeState = {
+                            edge: resizeEdge,
+                            startX: ev.clientX,
+                            startY: ev.clientY,
+                            startLeft: rect.left,
+                            startTop: rect.top,
+                            startWidth: rect.width,
+                            startHeight: rect.height
+                        };
+                        managerPreviewMaximizedSnapshot = null;
+                        previewExpandBtn.textContent = '⤢';
+                        previewExpandBtn.title = '扩展窗口';
+                        document.body.style.userSelect = 'none';
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        return;
+                    }
+                    if (ev.target === closeBtn || closeBtn.contains(ev.target)) {
+                        return;
+                    }
+                    if (isPreviewInteractiveTarget(ev.target)) {
+                        return;
+                    }
+                    const rect = managerPreviewPanel.getBoundingClientRect();
+                    managerPreviewPanel.style.transform = 'none';
+                    managerPreviewPanel.style.left = `${rect.left}px`;
+                    managerPreviewPanel.style.top = `${rect.top}px`;
+                    managerPreviewDragState = {
+                        offsetX: ev.clientX - rect.left,
+                        offsetY: ev.clientY - rect.top
+                    };
+                    document.body.style.userSelect = 'none';
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                }
+
+                function movePreviewDrag(ev) {
+                    if (managerPreviewResizeState && managerPreviewPanel) {
+                        const minW = 380;
+                        const minH = 260;
+                        const dx = ev.clientX - managerPreviewResizeState.startX;
+                        const dy = ev.clientY - managerPreviewResizeState.startY;
+                        let nextLeft = managerPreviewResizeState.startLeft;
+                        let nextTop = managerPreviewResizeState.startTop;
+                        let nextWidth = managerPreviewResizeState.startWidth;
+                        let nextHeight = managerPreviewResizeState.startHeight;
+
+                        if (managerPreviewResizeState.edge.right) {
+                            nextWidth = Math.max(minW, managerPreviewResizeState.startWidth + dx);
+                        }
+                        if (managerPreviewResizeState.edge.bottom) {
+                            nextHeight = Math.max(minH, managerPreviewResizeState.startHeight + dy);
+                        }
+                        if (managerPreviewResizeState.edge.left) {
+                            const rawWidth = managerPreviewResizeState.startWidth - dx;
+                            nextWidth = Math.max(minW, rawWidth);
+                            nextLeft = managerPreviewResizeState.startLeft + (managerPreviewResizeState.startWidth - nextWidth);
+                        }
+                        if (managerPreviewResizeState.edge.top) {
+                            const rawHeight = managerPreviewResizeState.startHeight - dy;
+                            nextHeight = Math.max(minH, rawHeight);
+                            nextTop = managerPreviewResizeState.startTop + (managerPreviewResizeState.startHeight - nextHeight);
+                        }
+
+                        managerPreviewPanel.style.left = `${nextLeft}px`;
+                        managerPreviewPanel.style.top = `${nextTop}px`;
+                        managerPreviewPanel.style.width = `${nextWidth}px`;
+                        managerPreviewPanel.style.height = `${nextHeight}px`;
+                        managerPreviewPanel.style.transform = 'none';
+                        return;
+                    }
+                    if (!managerPreviewDragState || !managerPreviewPanel) {
+                        return;
+                    }
+                    const nextLeft = ev.clientX - managerPreviewDragState.offsetX;
+                    const nextTop = ev.clientY - managerPreviewDragState.offsetY;
+                    managerPreviewPanel.style.left = `${nextLeft}px`;
+                    managerPreviewPanel.style.top = `${nextTop}px`;
+                    managerPreviewPanel.style.transform = 'none';
+                }
+
+                closeBtn.addEventListener('click', () => {
+                    endPreviewDrag();
+                    managerPreviewOverlay.style.display = 'none';
+                });
+                managerPreviewOverlay.addEventListener('click', (ev) => {
+                    if (ev.target === managerPreviewOverlay) {
+                        endPreviewDrag();
+                        managerPreviewOverlay.style.display = 'none';
+                    }
+                });
+                panel.addEventListener('mousedown', startPreviewDrag);
+                panel.addEventListener('mousemove', (ev) => {
+                    if (managerPreviewDragState || managerPreviewResizeState || !managerPreviewPanel) {
+                        return;
+                    }
+                    const edge = getPreviewResizeEdge(ev);
+                    managerPreviewPanel.style.cursor = edge ? previewResizeCursor(edge) : 'default';
+                });
+                previewExpandBtn.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    togglePreviewPanelMaximize();
+                });
+                previewExpandBtn.addEventListener('mouseenter', () => {
+                    previewExpandBtn.style.filter = 'brightness(1.06)';
+                });
+                previewExpandBtn.addEventListener('mouseleave', () => {
+                    previewExpandBtn.style.filter = 'none';
+                });
+                window.addEventListener('mousemove', movePreviewDrag);
+                window.addEventListener('mouseup', endPreviewDrag);
+                window.addEventListener('resize', () => {
+                    if (managerPreviewMaximizedSnapshot && managerPreviewPanel) {
+                        const pad = 16;
+                        managerPreviewPanel.style.left = `${pad}px`;
+                        managerPreviewPanel.style.top = `${pad}px`;
+                        managerPreviewPanel.style.width = `${Math.max(380, window.innerWidth - pad * 2)}px`;
+                        managerPreviewPanel.style.height = `${Math.max(260, window.innerHeight - pad * 2)}px`;
+                    }
+                });
+
+                header.appendChild(managerPreviewTitle);
+                header.appendChild(closeBtn);
+                panel.appendChild(header);
+                panel.appendChild(managerPreviewBody);
+                panel.appendChild(previewExpandBtn);
+                managerPreviewOverlay.appendChild(panel);
+                document.body.appendChild(managerPreviewOverlay);
+            }
+
+            async function openManagerDocumentPreview(item) {
+                const name = item && item.document_name ? String(item.document_name) : '';
+                if (!name) {
+                    return;
+                }
+                ensurePreviewDialog();
+                managerPreviewTitle.textContent = `文档预览: ${name}`;
+                managerPreviewBody.textContent = '文档内容加载中...';
+                managerPreviewOverlay.style.display = 'flex';
+                try {
+                    const result = await runPluginEntry('get_document_content', {
+                        document_name: name,
+                        max_chars: 28000
+                    });
+                    const data = result && result.data ? result.data : null;
+                    const found = !!(data && data.found);
+                    if (!found) {
+                        managerPreviewBody.textContent = '未找到该文档内容。';
+                        return;
+                    }
+                    const content = data && data.content ? String(data.content) : '';
+                    const docType = data && data.doc_type ? String(data.doc_type).toUpperCase() : '';
+                    const updatedAt = _formatUpdatedAt(data && data.updated_at ? data.updated_at : '');
+                    const fromChunks = !!(data && data.from_chunks);
+                    const meta = [
+                        `类型: ${docType || '未知'}`,
+                        updatedAt ? `更新时间: ${updatedAt}` : '',
+                        data && data.pdf_too_large ? '提示: 原PDF过大，已降级为文本预览' : '',
+                        fromChunks ? '来源: 索引分块拼接（原文件内容不可直接读取）' : '来源: 原文件读取'
+                    ].filter(Boolean).join(' | ');
+
+                    if (docType === 'PDF' && data && data.pdf_base64) {
+                        managerPreviewBody.innerHTML = '';
+
+                        const metaDiv = document.createElement('div');
+                        metaDiv.textContent = meta;
+                        Object.assign(metaDiv.style, {
+                            marginBottom: '10px',
+                            color: KB_MANAGER_THEME.actionText,
+                            fontWeight: '600'
+                        });
+
+                        const frame = document.createElement('iframe');
+                        frame.src = `data:application/pdf;base64,${String(data.pdf_base64)}`;
+                        frame.title = `PDF预览: ${name}`;
+                        Object.assign(frame.style, {
+                            width: '100%',
+                            height: '56vh',
+                            border: `1px solid ${KB_MANAGER_THEME.linePrimary}`,
+                            borderRadius: '8px',
+                            background: '#fff'
+                        });
+
+                        const detail = document.createElement('details');
+                        detail.style.marginTop = '10px';
+                        const summary = document.createElement('summary');
+                        summary.textContent = '查看抽取文本（用于检索）';
+                        summary.style.cursor = 'pointer';
+                        summary.style.color = '#2b5578';
+                        const textPre = document.createElement('pre');
+                        textPre.textContent = content || '(抽取文本为空)';
+                        Object.assign(textPre.style, {
+                            marginTop: '8px',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            maxHeight: '22vh',
+                            overflow: 'auto',
+                            padding: '8px',
+                            borderRadius: '8px',
+                            background: 'rgba(245,250,255,0.95)',
+                            border: `1px solid ${KB_MANAGER_THEME.lineSecondary}`
+                        });
+                        detail.appendChild(summary);
+                        detail.appendChild(textPre);
+
+                        managerPreviewBody.appendChild(metaDiv);
+                        managerPreviewBody.appendChild(frame);
+                        managerPreviewBody.appendChild(detail);
+                        return;
+                    }
+
+                    const isMarkdownLike = docType === 'MD' || name.toLowerCase().endsWith('.md') || name.toLowerCase().endsWith('.markdown');
+                    managerPreviewBody.innerHTML = '';
+
+                    const metaDiv = document.createElement('div');
+                    metaDiv.textContent = meta;
+                    Object.assign(metaDiv.style, {
+                        marginBottom: '10px',
+                        color: KB_MANAGER_THEME.actionText,
+                        fontWeight: '600'
+                    });
+                    managerPreviewBody.appendChild(metaDiv);
+
+                    if (isMarkdownLike) {
+                        const mdDiv = document.createElement('div');
+                        mdDiv.innerHTML = renderManagerMarkdown(content || '(文档内容为空)');
+                        Object.assign(mdDiv.style, {
+                            color: KB_MANAGER_THEME.actionText,
+                            lineHeight: '1.6',
+                            wordBreak: 'break-word'
+                        });
+                        managerPreviewBody.appendChild(mdDiv);
+                        await typesetManagerMath(mdDiv);
+                    } else {
+                        const plain = document.createElement('pre');
+                        plain.textContent = content || '(文档内容为空)';
+                        Object.assign(plain.style, {
+                            margin: '0',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word'
+                        });
+                        managerPreviewBody.appendChild(plain);
+                    }
+                } catch (err) {
+                    managerPreviewBody.textContent = `加载文档失败: ${err && err.message ? err.message : err}`;
+                }
+            }
+
+            function escapeHtml(text) {
+                return String(text || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            function ensureManagerMathJax() {
+                if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+                    return Promise.resolve(true);
+                }
+                if (managerMathJaxReadyPromise) {
+                    return managerMathJaxReadyPromise;
+                }
+                managerMathJaxReadyPromise = new Promise((resolve) => {
+                    try {
+                        if (!window.MathJax) {
+                            window.MathJax = {
+                                loader: {
+                                    load: ['[tex]/noerrors']
+                                },
+                                tex: {
+                                    inlineMath: [['$', '$'], ['\\(', '\\)']],
+                                    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                                    packages: { '[+]': ['noerrors'] }
+                                },
+                                options: {
+                                    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+                                },
+                                svg: {
+                                    fontCache: 'global'
+                                }
+                            };
+                        }
+                        const script = document.createElement('script');
+                        script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
+                        script.async = true;
+                        script.onload = () => resolve(true);
+                        script.onerror = () => resolve(false);
+                        document.head.appendChild(script);
+                    } catch (_err) {
+                        resolve(false);
+                    }
+                });
+                return managerMathJaxReadyPromise;
+            }
+
+            async function typesetManagerMath(container) {
+                if (!container) {
+                    return;
+                }
+                const ready = await ensureManagerMathJax();
+                if (!ready || !window.MathJax || typeof window.MathJax.typesetPromise !== 'function') {
+                    return;
+                }
+                try {
+                    await window.MathJax.typesetPromise([container]);
+                    container.querySelectorAll('.mjx-merror, .MathJax_Error, mjx-container [data-mml-node="merror"]').forEach((node) => {
+                        node.style.display = 'none';
+                    });
+                } catch (_err) {
+                    // 数学公式渲染失败时保留原文，不阻塞主流程。
+                }
+            }
+
+            function isLikelySafeMathExpression(expr) {
+                const source = String(expr || '').trim();
+                if (!source) {
+                    return false;
+                }
+                // 避免把整段 OCR/提取文本误判为公式，导致 MathJax 报错提示。
+                if (source.length > 220) {
+                    return false;
+                }
+                if (/\r|\n/.test(source)) {
+                    return false;
+                }
+                if (/(^|[^\\])#/.test(source)) {
+                    return false;
+                }
+                return true;
+            }
+
+            function renderInlineMarkdown(text) {
+                const source = String(text || '');
+                const formulas = [];
+                const tokenized = source.replace(/(\$\$[\s\S]+?\$\$|\$(?:\\.|[^$\\\n])+\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\])/g, (match) => {
+                    const token = `__NEKO_MATH_TOKEN_${formulas.length}__`;
+                    if (isLikelySafeMathExpression(match)) {
+                        formulas.push(match.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+                    } else {
+                        formulas.push(
+                            escapeHtml(match)
+                                .replace(/\$/g, '&#36;')
+                                .replace(/\\\(/g, '&#92;(')
+                                .replace(/\\\)/g, '&#92;)')
+                                .replace(/\\\[/g, '&#92;[')
+                                .replace(/\\\]/g, '&#92;]')
+                        );
+                    }
+                    return token;
+                });
+
+                let html = escapeHtml(tokenized);
+                html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(18,88,137,0.10); border-radius: 4px; padding: 1px 5px;">$1</code>');
+                html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+                html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+                html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color: #40C5F1; text-decoration: underline;">$1</a>');
+
+                formulas.forEach((formula, idx) => {
+                    const token = `__NEKO_MATH_TOKEN_${idx}__`;
+                    html = html.split(token).join(formula);
+                });
+                // Defensive fallback: strip unresolved math placeholders instead of leaking tokens to UI.
+                html = html.replace(/__NEKO_MATH_TOKEN_\d+__/g, '');
+                return html;
+            }
+
+            function decodeEscapedLineBreaks(text) {
+                const source = String(text || '').replace(/\r\n/g, '\n');
+                if (source.includes('\n')) {
+                    return source;
+                }
+                if (!source.includes('\\n')) {
+                    return source;
+                }
+                const count = (source.match(/\\n/g) || []).length;
+                if (count < 2 && !source.includes('\\n\\n')) {
+                    return source;
+                }
+                return source.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+            }
+
+            function renderManagerMarkdown(text) {
+                const source = decodeEscapedLineBreaks(text);
+                const blocks = source.split(/\n{2,}/);
+                const htmlBlocks = [];
+
+                blocks.forEach((block) => {
+                    const raw = String(block || '').trim();
+                    if (!raw) {
+                        return;
+                    }
+
+                    if (raw.startsWith('```') && raw.endsWith('```')) {
+                        const code = raw.replace(/^```[\w-]*\n?/, '').replace(/```$/, '');
+                        htmlBlocks.push(`<pre style="margin: 0 0 12px 0; padding: 10px; border-radius: 8px; background: rgba(13,44,70,0.08); overflow: auto;"><code>${escapeHtml(code)}</code></pre>`);
+                        return;
+                    }
+
+                    if ((raw.startsWith('$$') && raw.endsWith('$$')) || (raw.startsWith('\\[') && raw.endsWith('\\]'))) {
+                        if (isLikelySafeMathExpression(raw)) {
+                            htmlBlocks.push(`<div style="margin: 0 0 12px 0; padding: 10px 8px; border-radius: 8px; background: rgba(64, 197, 241, 0.08); overflow-x: auto;">${raw}</div>`);
+                        } else {
+                            htmlBlocks.push(`<pre style="margin: 0 0 12px 0; padding: 10px; border-radius: 8px; background: rgba(13,44,70,0.08); overflow: auto;"><code>${escapeHtml(raw)}</code></pre>`);
+                        }
+                        return;
+                    }
+
+                    const lines = raw.split('\n');
+                    if (lines.length >= 2 && /^\s*\|?\s*[-: ]+[-|: ]*\s*$/.test(lines[1])) {
+                        const rowHtml = lines
+                            .map((line, idx) => {
+                                const cells = line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => renderInlineMarkdown(cell.trim()));
+                                const tag = idx === 0 ? 'th' : 'td';
+                                const cellHtml = cells.map((cell) => `<${tag} style="border: 1px solid rgba(33,71,103,0.18); padding: 6px 8px;">${cell}</${tag}>`).join('');
+                                return idx === 1 ? '' : `<tr>${cellHtml}</tr>`;
+                            })
+                            .filter(Boolean)
+                            .join('');
+                        htmlBlocks.push(`<table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">${rowHtml}</table>`);
+                        return;
+                    }
+
+                    if (/^#{1,6}\s+/.test(raw)) {
+                        const level = Math.min(6, (raw.match(/^#+/) || ['#'])[0].length);
+                        const content = raw.replace(/^#{1,6}\s+/, '');
+                        htmlBlocks.push(`<h${level} style="margin: 12px 0 8px 0;">${renderInlineMarkdown(content)}</h${level}>`);
+                        return;
+                    }
+
+                    if (lines.every((line) => /^\s*[-*+]\s+/.test(line))) {
+                        const items = lines.map((line) => `<li>${renderInlineMarkdown(line.replace(/^\s*[-*+]\s+/, ''))}</li>`).join('');
+                        htmlBlocks.push(`<ul style="margin: 0 0 12px 18px; padding: 0;">${items}</ul>`);
+                        return;
+                    }
+
+                    if (lines.every((line) => /^\s*\d+\.\s+/.test(line))) {
+                        const items = lines.map((line) => `<li>${renderInlineMarkdown(line.replace(/^\s*\d+\.\s+/, ''))}</li>`).join('');
+                        htmlBlocks.push(`<ol style="margin: 0 0 12px 18px; padding: 0;">${items}</ol>`);
+                        return;
+                    }
+
+                    if (lines.every((line) => /^>\s?/.test(line))) {
+                        const quote = lines.map((line) => renderInlineMarkdown(line.replace(/^>\s?/, ''))).join('<br>');
+                        htmlBlocks.push(`<blockquote style="margin: 0 0 12px 0; padding: 8px 12px; border-left: 3px solid rgba(33,71,103,0.28); background: rgba(33,71,103,0.06);">${quote}</blockquote>`);
+                        return;
+                    }
+
+                    htmlBlocks.push(`<p style="margin: 0 0 12px 0;">${lines.map((line) => renderInlineMarkdown(line)).join('<br>')}</p>`);
+                });
+
+                return htmlBlocks.join('');
+            }
+
+            async function moveManagerEntity(payload, targetFolder) {
+                const folderPath = normalizeManagerFolderPath(targetFolder);
+                if (!payload || !folderPath) {
+                    return;
+                }
+                try {
+                    if (payload.type === 'document' && payload.document_name) {
+                        const result = await runPluginEntry('move_document', {
+                            document_name: payload.document_name,
+                            target_folder: folderPath
+                        });
+                        const data = result && result.data ? result.data : null;
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(data && data.message ? String(data.message) : '文档移动完成', 2600);
+                        }
+                        await loadManagerDocuments();
+                        return;
+                    }
+
+                    if (payload.type === 'folder' && payload.folder_path) {
+                        const sourceFolder = normalizeManagerFolderPath(payload.folder_path);
+                        if (!sourceFolder || sourceFolder === folderPath || folderPath.startsWith(`${sourceFolder}/`)) {
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast('不能把目录移动到自己内部', 2600);
+                            }
+                            return;
+                        }
+                        const result = await runPluginEntry('move_folder', {
+                            folder_path: sourceFolder,
+                            target_folder: folderPath
+                        });
+                        const data = result && result.data ? result.data : null;
+                        if (data && data.moved && managerCurrentFolder === sourceFolder && data.new_folder_path) {
+                            managerCurrentFolder = String(data.new_folder_path);
+                        }
+                        if (typeof window.showStatusToast === 'function') {
+                            window.showStatusToast(data && data.message ? String(data.message) : '目录移动完成', 2800);
+                        }
+                        await loadManagerDocuments();
+                    }
+                } catch (err) {
+                    if (typeof window.showStatusToast === 'function') {
+                        window.showStatusToast(`移动失败: ${err && err.message ? err.message : err}`, 4200);
+                    }
+                }
+            }
+
+            function bindDropTarget(node, targetFolder) {
+                if (!node) {
+                    return;
+                }
+                const normalizedTarget = normalizeManagerFolderPath(targetFolder);
+                node.addEventListener('dragover', (ev) => {
+                    ev.preventDefault();
+                    node.style.boxShadow = '0 0 0 2px rgba(64, 197, 241, 0.45)';
+                });
+                node.addEventListener('dragleave', () => {
+                    node.style.boxShadow = 'none';
+                });
+                node.addEventListener('drop', async (ev) => {
+                    ev.preventDefault();
+                    node.style.boxShadow = 'none';
+                    let payload = null;
+                    try {
+                        payload = JSON.parse(ev.dataTransfer.getData('application/x-neko-kb-item') || '{}');
+                    } catch (e) {
+                        payload = null;
+                    }
+                    if (!payload) {
+                        return;
+                    }
+                    await moveManagerEntity(payload, normalizedTarget);
+                });
+            }
+
+            function renderManagerFolders(folders, appendMode = false) {
+                if (!managerRows) {
+                    return;
+                }
+                if (!appendMode) {
+                    managerRows.innerHTML = '';
+                }
+                if (!Array.isArray(folders) || folders.length === 0) {
+                    if (!appendMode) {
+                        setManagerRowsMessage('暂无可用文件夹');
+                    }
+                    return;
+                }
+
+                folders.forEach((folder) => {
+                    const folderKey = folder && folder.folder_key ? normalizeManagerFolderPath(folder.folder_key) : '';
+                    const folderName = folder && folder.folder_name ? String(folder.folder_name) : (folderKey || '未命名目录');
+                    const docCount = Number(folder && folder.document_count ? folder.document_count : 0);
+                    const updatedAt = _formatUpdatedAt(folder && folder.updated_at ? folder.updated_at : '');
+
+                    const card = document.createElement('div');
+                    Object.assign(card.style, {
+                        border: `1px solid ${KB_MANAGER_THEME.lineSoft}`,
+                        borderRadius: '12px',
+                        background: 'rgba(255,255,255,0.82)',
+                        padding: '10px 12px',
+                        marginBottom: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.16s ease'
+                    });
+
+                    const headRow = document.createElement('div');
+                    Object.assign(headRow.style, {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                    });
+
+                    const title = document.createElement('div');
+                    title.textContent = `文件夹: ${folderName}`;
+                    Object.assign(title.style, {
+                        color: KB_MANAGER_THEME.actionText,
+                        fontSize: '14px',
+                        fontWeight: '700',
+                        flex: '1',
+                        minWidth: '0',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                    });
+
+                    const renameBtn = document.createElement('button');
+                    renameBtn.type = 'button';
+                    renameBtn.textContent = '重命名';
+                    Object.assign(renameBtn.style, {
+                        border: `1px solid ${KB_MANAGER_THEME.lineSoft}`,
+                        background: 'rgba(255,255,255,0.96)',
+                        color: KB_MANAGER_THEME.actionText,
+                        borderRadius: '999px',
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        flexShrink: '0'
+                    });
+
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.textContent = '删除';
+                    Object.assign(removeBtn.style, {
+                        border: '1px solid rgba(244, 67, 54, 0.25)',
+                        background: 'rgba(255,255,255,0.96)',
+                        color: '#d32f2f',
+                        borderRadius: '999px',
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        flexShrink: '0'
+                    });
+
+                    const meta = document.createElement('div');
+                    meta.textContent = updatedAt
+                        ? `文档数: ${docCount} | 最近更新: ${updatedAt} | 拖入此目录可归类`
+                        : `文档数: ${docCount} | 拖入此目录可归类`;
+                    Object.assign(meta.style, {
+                        fontSize: '11px',
+                        color: KB_MANAGER_THEME.actionText,
+                        marginTop: '4px'
+                    });
+
+                    headRow.appendChild(title);
+                    headRow.appendChild(renameBtn);
+                    headRow.appendChild(removeBtn);
+                    card.appendChild(headRow);
+                    card.appendChild(meta);
+                    managerRows.appendChild(card);
+
+                    card.draggable = !!folderKey;
+                    card.addEventListener('dragstart', (ev) => {
+                        if (!folderKey || !ev.dataTransfer) {
+                            return;
+                        }
+                        ev.dataTransfer.effectAllowed = 'move';
+                        ev.dataTransfer.setData('application/x-neko-kb-item', JSON.stringify({
+                            type: 'folder',
+                            folder_path: folderKey
+                        }));
+                    });
+
+                    bindDropTarget(card, folderKey);
+
+                    card.addEventListener('mouseenter', () => {
+                        card.style.transform = 'translateY(-1px)';
+                        card.style.boxShadow = '0 8px 20px rgba(64, 197, 241, 0.2)';
+                    });
+                    card.addEventListener('mouseleave', () => {
+                        card.style.transform = 'translateY(0)';
+                        card.style.boxShadow = 'none';
+                    });
+
+                    renameBtn.addEventListener('click', async (ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (!folderKey) {
+                            return;
+                        }
+                        const suggest = folderName;
+                        const input = window.prompt('请输入新文件夹名称', suggest);
+                        if (input === null) {
+                            return;
+                        }
+                        const nextName = String(input || '').trim();
+                        if (!nextName) {
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast('文件夹名称不能为空', 2600);
+                            }
+                            return;
+                        }
+                        try {
+                            const result = await runPluginEntry('rename_folder', {
+                                folder_path: folderKey,
+                                new_name: nextName
+                            });
+                            const data = result && result.data ? result.data : null;
+                            if (data && data.renamed && managerCurrentFolder === folderKey && data.new_folder_path) {
+                                managerCurrentFolder = String(data.new_folder_path);
+                            }
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast(data && data.message ? String(data.message) : '目录重命名完成', 2800);
+                            }
+                            await loadManagerDocuments();
+                        } catch (err) {
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast(`重命名目录失败: ${err && err.message ? err.message : err}`, 4200);
+                            }
+                        }
+                    });
+
+                    removeBtn.addEventListener('click', async (ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (!folderKey) {
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast('目录路径无效，无法删除', 2600);
+                            }
+                            return;
+                        }
+                        const ok = window.confirm(`确认删除目录及其内部文档: ${folderName} ?`);
+                        if (!ok) {
+                            return;
+                        }
+                        try {
+                            const result = await runPluginEntry('delete_folder', {
+                                folder_path: folderKey
+                            });
+                            const data = result && result.data ? result.data : null;
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast(data && data.message ? String(data.message) : '目录删除完成', 3200);
+                            }
+                            if (managerCurrentFolder === folderKey) {
+                                managerCurrentFolder = '';
+                            }
+                            await loadManagerDocuments();
+                        } catch (err) {
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast(`删除目录失败: ${err && err.message ? err.message : err}`, 4200);
+                            }
+                        }
+                    });
+
+                    card.addEventListener('click', async () => {
+                        if (!folderKey) {
+                            return;
+                        }
+                        managerCurrentFolder = folderKey;
+                        managerFilterKeyword = '';
+                        if (managerSearchInput) {
+                            managerSearchInput.value = '';
+                        }
+                        await loadManagerDocuments();
+                    });
+                });
+            }
+
+            function applyManagerDocsView() {
+                const keyword = String(managerFilterKeyword || '').trim().toLowerCase();
+                updateManagerBreadcrumb();
+
+                const folders = Array.isArray(managerFoldersCache) ? managerFoldersCache.slice() : [];
+                const docs = Array.isArray(managerDocsCache) ? managerDocsCache.slice() : [];
+
+                let folderFiltered = folders;
+                let docFiltered = docs;
+                if (keyword) {
+                    folderFiltered = folders.filter((item) => {
+                        const name = item && item.folder_name ? String(item.folder_name).toLowerCase() : '';
+                        return name.includes(keyword);
+                    });
+                    docFiltered = docs.filter((item) => {
+                        const name = item && item.document_name ? String(item.document_name).toLowerCase() : '';
+                        return name.includes(keyword);
+                    });
+                }
+
+                docFiltered.sort((a, b) => {
+                    const nameA = a && a.document_name ? String(a.document_name) : '';
+                    const nameB = b && b.document_name ? String(b.document_name) : '';
+                    const chunkA = Number(a && a.chunk_count ? a.chunk_count : 0);
+                    const chunkB = Number(b && b.chunk_count ? b.chunk_count : 0);
+                    const timeA = _toUpdatedTimestamp(a);
+                    const timeB = _toUpdatedTimestamp(b);
+
+                    if (managerSortBy === 'updated_asc') return timeA - timeB;
+                    if (managerSortBy === 'name_asc') return nameA.localeCompare(nameB, 'zh-Hans-CN');
+                    if (managerSortBy === 'name_desc') return nameB.localeCompare(nameA, 'zh-Hans-CN');
+                    if (managerSortBy === 'chunk_desc') return chunkB - chunkA;
+                    if (managerSortBy === 'chunk_asc') return chunkA - chunkB;
+                    return timeB - timeA;
+                });
+
+                if (managerTitle) {
+                    const posTitle = managerCurrentFolder ? `知识库文档管理（${managerCurrentFolder}）` : '知识库文档管理（根目录）';
+                    managerTitle.textContent = `${posTitle} 文件夹 ${folderFiltered.length}/${folders.length} 文档 ${docFiltered.length}/${docs.length}`;
+                }
+
+                if (!managerRows) {
+                    return;
+                }
+                managerRows.innerHTML = '';
+                if (folderFiltered.length === 0 && docFiltered.length === 0) {
+                    if (keyword) {
+                        setManagerRowsMessage(`未找到匹配内容: ${keyword}`);
+                    } else {
+                        setManagerRowsMessage('当前目录为空');
+                    }
+                    return;
+                }
+
+                if (folderFiltered.length > 0) {
+                    renderManagerFolders(folderFiltered, true);
+                }
+                if (docFiltered.length > 0) {
+                    renderManagerDocuments(docFiltered, true);
+                }
+            }
+
+            function setManagerRowsMessage(message) {
+                if (!managerRows) {
+                    return;
+                }
+                managerRows.innerHTML = '';
+                const row = document.createElement('div');
+                row.textContent = message;
+                Object.assign(row.style, {
+                    fontSize: '12px',
+                    opacity: '0.8',
+                    padding: '10px 8px'
+                });
+                managerRows.appendChild(row);
+            }
+
+            function renderManagerDocuments(docs, appendMode = false) {
+                if (!managerRows) {
+                    return;
+                }
+                if (!appendMode) {
+                    managerRows.innerHTML = '';
+                }
+
+                if (!Array.isArray(docs) || docs.length === 0) {
+                    if (!appendMode) {
+                        setManagerRowsMessage('当前未收录文档');
+                    }
+                    return;
+                }
+
+                docs.forEach((item, idx) => {
+                    const name = item && item.document_name ? String(item.document_name) : '(未命名)';
+                    const chunks = Number(item && item.chunk_count ? item.chunk_count : 0);
+
+                    const row = document.createElement('div');
+                    Object.assign(row.style, {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        border: `1px solid ${KB_MANAGER_THEME.lineSoft}`,
+                        borderRadius: '10px',
+                        background: 'rgba(255,255,255,0.75)',
+                        padding: '8px 10px',
+                        marginBottom: '8px',
+                        cursor: 'pointer'
+                    });
+                    row.draggable = true;
+                    row.addEventListener('dragstart', (ev) => {
+                        if (!ev.dataTransfer || !name || name === '(未命名)') {
+                            return;
+                        }
+                        ev.dataTransfer.effectAllowed = 'move';
+                        ev.dataTransfer.setData('application/x-neko-kb-item', JSON.stringify({
+                            type: 'document',
+                            document_name: name
+                        }));
+                    });
+
+                    const idxTag = document.createElement('div');
+                    idxTag.textContent = String(idx + 1);
+                    Object.assign(idxTag.style, {
+                        width: '20px',
+                        textAlign: 'center',
+                        fontSize: '11px',
+                        opacity: '0.7'
+                    });
+
+                    const info = document.createElement('div');
+                    Object.assign(info.style, {
+                        flex: '1',
+                        minWidth: '0'
+                    });
+
+                    const title = document.createElement('div');
+                    title.textContent = name;
+                    Object.assign(title.style, {
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        color: KB_MANAGER_THEME.actionText,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                    });
+
+                    const meta = document.createElement('div');
+                    const updatedAt = item && item.updated_at ? String(item.updated_at).replace('T', ' ').slice(0, 19) : '';
+                    const docType = item && item.doc_type ? String(item.doc_type).toUpperCase() : (name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'MD');
+                    meta.textContent = updatedAt
+                        ? `类型: ${docType} | 分块: ${chunks} | 更新: ${updatedAt}`
+                        : `类型: ${docType} | 分块: ${chunks}`;
+                    Object.assign(meta.style, {
+                        fontSize: '11px',
+                        color: KB_MANAGER_THEME.actionText,
+                        opacity: '0.92',
+                        marginTop: '2px'
+                    });
+
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.textContent = '删除文档';
+                    Object.assign(delBtn.style, {
+                        border: 'none',
+                        background: KB_MANAGER_THEME.danger,
+                        color: '#ffffff',
+                        borderRadius: '999px',
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        boxShadow: '0 1px 3px rgba(255, 82, 82, 0.2)',
+                        cursor: 'pointer',
+                        flexShrink: '0'
+                    });
+
+                    delBtn.addEventListener('click', async (ev) => {
+                        ev.stopPropagation();
+                        const ok = window.confirm(`确认删除文档: ${name} ?`);
+                        if (!ok) {
+                            return;
+                        }
+                        try {
+                            await runPluginEntry('delete_document', { document_name: name });
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast(`已删除: ${name}`, 2800);
+                            }
+                            await loadManagerDocuments();
+                        } catch (err) {
+                            if (typeof window.showStatusToast === 'function') {
+                                window.showStatusToast(`删除文档失败: ${err && err.message ? err.message : err}`, 4500);
+                            }
+                        }
+                    });
+
+                    info.appendChild(title);
+                    info.appendChild(meta);
+                    row.appendChild(idxTag);
+                    row.appendChild(info);
+                    row.appendChild(delBtn);
+                    managerRows.appendChild(row);
+
+                    row.addEventListener('mouseenter', () => {
+                        row.style.boxShadow = '0 8px 20px rgba(64, 197, 241, 0.22)';
+                        row.style.transform = 'translateY(-1px)';
+                    });
+                    row.addEventListener('mouseleave', () => {
+                        row.style.boxShadow = 'none';
+                        row.style.transform = 'translateY(0)';
+                    });
+
+                    delBtn.addEventListener('mouseenter', () => {
+                        delBtn.style.background = KB_MANAGER_THEME.dangerHover;
+                        delBtn.style.transform = 'translateY(-1px)';
+                        delBtn.style.boxShadow = '0 2px 8px rgba(255, 82, 82, 0.3)';
+                    });
+                    delBtn.addEventListener('mouseleave', () => {
+                        delBtn.style.background = KB_MANAGER_THEME.danger;
+                        delBtn.style.transform = 'translateY(0)';
+                        delBtn.style.boxShadow = '0 1px 3px rgba(255, 82, 82, 0.2)';
+                    });
+                    delBtn.addEventListener('mousedown', () => {
+                        delBtn.style.background = KB_MANAGER_THEME.dangerActive;
+                        delBtn.style.transform = 'translateY(1px) scale(0.98)';
+                    });
+                    delBtn.addEventListener('mouseup', () => {
+                        delBtn.style.background = KB_MANAGER_THEME.dangerHover;
+                        delBtn.style.transform = 'translateY(-1px)';
+                    });
+
+                    row.addEventListener('click', async () => {
+                        await openManagerDocumentPreview(item);
+                    });
+                });
+            }
+
+            async function loadManagerDocuments() {
+                if (managerLoading) {
+                    return;
+                }
+                managerLoading = true;
+                setManagerRowsMessage('文档列表加载中...');
+                try {
+                    let folders = [];
+                    let docs = [];
+                    try {
+                        const managerView = await runPluginEntry('list_manager_view', {
+                            parent_folder: managerCurrentFolder || '',
+                            limit: 300,
+                            include_subfolders: false
+                        });
+                        const mvData = managerView && managerView.data ? managerView.data : null;
+                        folders = Array.isArray(mvData && mvData.folders) ? mvData.folders : [];
+                        docs = Array.isArray(mvData && mvData.documents) ? mvData.documents : [];
+                    } catch (_managerViewErr) {
+                        let folderResult = null;
+                        try {
+                            folderResult = await runPluginEntry('list_document_folders', {
+                                parent_folder: managerCurrentFolder || ''
+                            });
+                        } catch (err) {
+                            folderResult = null;
+                        }
+                        const folderData = folderResult && folderResult.data ? folderResult.data : null;
+                        folders = Array.isArray(folderData && folderData.folders) ? folderData.folders : [];
+
+                        const listArgs = { limit: 300, include_subfolders: false };
+                        if (managerCurrentFolder) {
+                            listArgs.folder = managerCurrentFolder;
+                        }
+                        const result = await runPluginEntry('list_documents', listArgs);
+                        const data = result && result.data ? result.data : null;
+                        docs = Array.isArray(data && data.documents) ? data.documents : [];
+                    }
+
+                    managerFoldersCache = folders;
+                    managerDocsCache = docs;
+                    applyManagerDocsView();
+                    if (!managerCurrentFolder) {
+                        setManagerInlineStatus('');
+                    }
+                } catch (err) {
+                    managerFoldersCache = [];
+                    managerDocsCache = [];
+                    setManagerRowsMessage(`读取文档列表失败: ${err && err.message ? err.message : err}`);
+                } finally {
+                    managerLoading = false;
+                }
+            }
+
+            window.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Escape' && managerPreviewOverlay && managerPreviewOverlay.style.display === 'flex') {
+                    managerPreviewOverlay.style.display = 'none';
+                    return;
+                }
+                if (ev.key === 'Escape' && managerOverlay && managerOverlay.style.display === 'flex') {
+                    managerOverlay.style.display = 'none';
+                    if (typeof managerOverlay._setHudOverlayInteractivity === 'function') {
+                        managerOverlay._setHudOverlayInteractivity(false);
+                    }
+                }
+            });
+
+            function arrayBufferToBase64(buffer) {
+                const bytes = new Uint8Array(buffer);
+                const chunkSize = 0x8000;
+                let binary = '';
+                for (let i = 0; i < bytes.length; i += chunkSize) {
+                    const sub = bytes.subarray(i, i + chunkSize);
+                    binary += String.fromCharCode(...sub);
+                }
+                return btoa(binary);
+            }
+
+            async function uploadKnowledgeFile(file, targetFolder = '') {
+                if (!file) {
+                    return;
+                }
+                const lowerName = String(file.name || '').toLowerCase();
+                const isPdf = lowerName.endsWith('.pdf') || String(file.type || '').toLowerCase() === 'application/pdf';
+
+                try {
+                    setManagerInlineStatus('文档上传中，请稍候...');
+                    const normalizedTargetFolder = normalizeManagerFolderPath(targetFolder);
+                    let uploadResult = null;
+                    if (isPdf) {
+                        const arr = await file.arrayBuffer();
+                        const pdfBase64 = arrayBufferToBase64(arr);
+                        uploadResult = await runPluginEntry('upload_markdown', {
+                            markdown_text: '',
+                            pdf_base64: pdfBase64,
+                            document_name: file.name,
+                            folder: normalizedTargetFolder
+                        });
+                    } else {
+                        const markdownText = await file.text();
+                        uploadResult = await runPluginEntry('upload_markdown', {
+                            markdown_text: markdownText,
+                            document_name: file.name,
+                            folder: normalizedTargetFolder
+                        });
+                    }
+                    const data = uploadResult && uploadResult.data ? uploadResult.data : null;
+                    const uploadedName = data && data.document_name ? data.document_name : file.name;
+                    const total = data && Number.isFinite(Number(data.document_total)) ? Number(data.document_total) : kbState.documentTotal;
+
+                    kbState.documentName = uploadedName;
+                    kbState.documentTotal = total;
+                    localStorage.setItem(KB_DOC_KEY, kbState.documentName);
+                    localStorage.setItem(KB_DOC_TOTAL_KEY, String(kbState.documentTotal));
+                    updateKbDocHint();
+
+                    if (typeof window.showStatusToast === 'function') {
+                        if (kbState.documentTotal > 1) {
+                            window.showStatusToast(`知识库上传完成: ${uploadedName} (共 ${kbState.documentTotal} 篇)`, 3000);
+                        } else {
+                            window.showStatusToast(`知识库上传完成: ${uploadedName}`, 3000);
+                        }
+                    }
+                    if (normalizedTargetFolder) {
+                        setManagerInlineStatus(`上传完成: ${uploadedName} -> ${normalizedTargetFolder}`);
+                    } else {
+                        setManagerInlineStatus(`上传完成: ${uploadedName}`);
+                    }
+                } catch (err) {
+                    if (typeof window.showStatusToast === 'function') {
+                        window.showStatusToast(`知识库上传失败: ${err && err.message ? err.message : err}`, 5000);
+                    }
+                    setManagerInlineStatus(`上传失败: ${err && err.message ? err.message : err}`, true);
+                }
+            }
+
             kbModeBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 kbState.enabled = !kbState.enabled;
@@ -532,170 +2628,39 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
                 fileInput.click();
             });
 
-            listBtn.addEventListener('click', async (e) => {
+            manageBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                try {
-                    const result = await runPluginEntry('list_documents', { limit: 50 });
-                    const data = result && result.data ? result.data : null;
-                    const docs = Array.isArray(data && data.documents) ? data.documents : [];
-                    const total = Number(data && data.document_total ? data.document_total : docs.length);
-
-                    kbState.documentTotal = Number.isFinite(total) ? total : docs.length;
-                    localStorage.setItem(KB_DOC_TOTAL_KEY, String(kbState.documentTotal));
-                    if (!kbState.documentName && docs.length > 0 && docs[0] && docs[0].document_name) {
-                        kbState.documentName = String(docs[0].document_name);
-                        localStorage.setItem(KB_DOC_KEY, kbState.documentName);
-                    }
-                    updateKbDocHint();
-
-                    if (docs.length === 0) {
-                        if (typeof window.showStatusToast === 'function') {
-                            window.showStatusToast('知识库当前没有已收录文档', 2800);
-                        }
-                        return;
-                    }
-
-                    const maxShow = Math.min(docs.length, 20);
-                    const lines = [];
-                    for (let i = 0; i < maxShow; i++) {
-                        const item = docs[i] || {};
-                        const name = item.document_name ? String(item.document_name) : '(未命名)';
-                        const chunkCount = Number(item.chunk_count || 0);
-                        lines.push(`${i + 1}. ${name} (${chunkCount} 块)`);
-                    }
-                    const suffix = docs.length > maxShow ? '\n...' : '';
-                    window.alert(`知识库已收录 ${docs.length} 篇文档:\n${lines.join('\n')}${suffix}`);
-                } catch (err) {
-                    if (typeof window.showStatusToast === 'function') {
-                        window.showStatusToast(`读取文档列表失败: ${err && err.message ? err.message : err}`, 4500);
-                    }
+                ensureManagerDialog();
+                managerCurrentFolder = '';
+                if (managerSearchInput) {
+                    managerSearchInput.value = '';
                 }
-            });
-
-            deleteBtn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                try {
-                    const result = await runPluginEntry('list_documents', { limit: 50 });
-                    const data = result && result.data ? result.data : null;
-                    const docs = Array.isArray(data && data.documents) ? data.documents : [];
-
-                    if (docs.length === 0) {
-                        if (typeof window.showStatusToast === 'function') {
-                            window.showStatusToast('知识库没有可删除的文档', 2800);
-                        }
-                        return;
-                    }
-
-                    const maxShow = Math.min(docs.length, 20);
-                    const lines = [];
-                    for (let i = 0; i < maxShow; i++) {
-                        const item = docs[i] || {};
-                        const name = item.document_name ? String(item.document_name) : '(未命名)';
-                        const chunkCount = Number(item.chunk_count || 0);
-                        lines.push(`${i + 1}. ${name} (${chunkCount} 块)`);
-                    }
-                    const guide = docs.length > maxShow ? '\n(只展示前20项，可输入完整文档名删除)' : '';
-                    const pick = window.prompt(
-                        `输入要删除的序号或文档名:\n${lines.join('\n')}${guide}`,
-                        docs[0] && docs[0].document_name ? String(docs[0].document_name) : ''
-                    );
-                    if (!pick) {
-                        return;
-                    }
-
-                    const text = String(pick).trim();
-                    let targetName = text;
-                    if (/^\d+$/.test(text)) {
-                        const idx = Number(text) - 1;
-                        if (idx < 0 || idx >= docs.length) {
-                            if (typeof window.showStatusToast === 'function') {
-                                window.showStatusToast('序号无效，未执行删除', 2800);
-                            }
-                            return;
-                        }
-                        targetName = String(docs[idx].document_name || '');
-                    }
-
-                    if (!targetName) {
-                        if (typeof window.showStatusToast === 'function') {
-                            window.showStatusToast('文档名为空，未执行删除', 2800);
-                        }
-                        return;
-                    }
-
-                    const confirmed = window.confirm(`确认删除文档: ${targetName} ?`);
-                    if (!confirmed) {
-                        return;
-                    }
-
-                    const delResult = await runPluginEntry('delete_document', { document_name: targetName });
-                    const delData = delResult && delResult.data ? delResult.data : null;
-                    const deleted = !!(delData && delData.deleted);
-                    const afterTotal = Number(delData && delData.document_total ? delData.document_total : 0);
-
-                    kbState.documentTotal = Number.isFinite(afterTotal) ? afterTotal : 0;
-                    if (kbState.documentName === targetName) {
-                        kbState.documentName = '';
-                    }
-                    localStorage.setItem(KB_DOC_TOTAL_KEY, String(kbState.documentTotal));
-                    localStorage.setItem(KB_DOC_KEY, kbState.documentName);
-                    updateKbDocHint();
-
-                    if (typeof window.showStatusToast === 'function') {
-                        window.showStatusToast(
-                            deleted ? `已删除: ${targetName}` : `未找到文档: ${targetName}`,
-                            3200
-                        );
-                    }
-                } catch (err) {
-                    if (typeof window.showStatusToast === 'function') {
-                        window.showStatusToast(`删除文档失败: ${err && err.message ? err.message : err}`, 4500);
-                    }
+                if (managerSortSelect) {
+                    managerSortSelect.value = 'updated_desc';
                 }
+                managerFilterKeyword = '';
+                managerSortBy = 'updated_desc';
+                setManagerInlineStatus('');
+                if (typeof managerOverlay._setHudOverlayInteractivity === 'function') {
+                    managerOverlay._setHudOverlayInteractivity(true);
+                }
+                managerOverlay.style.display = 'flex';
+                await loadManagerDocuments();
             });
 
             fileInput.addEventListener('change', async () => {
                 const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
                 fileInput.value = '';
                 if (!file) return;
+                await uploadKnowledgeFile(file);
+            });
 
-                if (!file.name.toLowerCase().endsWith('.md') && !file.name.toLowerCase().endsWith('.markdown')) {
-                    if (typeof window.showStatusToast === 'function') {
-                        window.showStatusToast('只支持上传 .md / .markdown 文件', 3000);
-                    }
-                    return;
-                }
-
-                try {
-                    if (typeof window.showStatusToast === 'function') {
-                        window.showStatusToast('知识库文档上传中...', 2500);
-                    }
-                    const markdownText = await file.text();
-                    const uploadResult = await runPluginEntry('upload_markdown', {
-                        markdown_text: markdownText,
-                        document_name: file.name
-                    });
-                    const data = uploadResult && uploadResult.data ? uploadResult.data : null;
-                    const uploadedName = data && data.document_name ? data.document_name : file.name;
-                    const total = data && Number.isFinite(Number(data.document_total)) ? Number(data.document_total) : kbState.documentTotal;
-
-                    kbState.documentName = uploadedName;
-                    kbState.documentTotal = total;
-                    localStorage.setItem(KB_DOC_KEY, kbState.documentName);
-                    localStorage.setItem(KB_DOC_TOTAL_KEY, String(kbState.documentTotal));
-                    updateKbDocHint();
-                    if (typeof window.showStatusToast === 'function') {
-                        if (kbState.documentTotal > 1) {
-                            window.showStatusToast(`知识库上传完成: ${uploadedName} (共 ${kbState.documentTotal} 篇)`, 3000);
-                        } else {
-                            window.showStatusToast(`知识库上传完成: ${uploadedName}`, 3000);
-                        }
-                    }
-                } catch (err) {
-                    if (typeof window.showStatusToast === 'function') {
-                        window.showStatusToast(`知识库上传失败: ${err && err.message ? err.message : err}`, 5000);
-                    }
-                }
+            managerUploadInput.addEventListener('change', async () => {
+                const file = managerUploadInput.files && managerUploadInput.files[0] ? managerUploadInput.files[0] : null;
+                managerUploadInput.value = '';
+                if (!file) return;
+                await uploadKnowledgeFile(file, managerCurrentFolder || '');
+                await loadManagerDocuments();
             });
 
             // 供聊天发送逻辑调用：开启后直接走 knowledge_base:ask
@@ -711,10 +2676,10 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
 
             sidePanel.appendChild(kbModeBtn);
             sidePanel.appendChild(uploadBtn);
-            sidePanel.appendChild(listBtn);
-            sidePanel.appendChild(deleteBtn);
+            sidePanel.appendChild(manageBtn);
             sidePanel.appendChild(kbDocHint);
             sidePanel.appendChild(fileInput);
+            sidePanel.appendChild(managerUploadInput);
             document.body.appendChild(sidePanel);
             this._attachSidePanelHover(toggleItem, sidePanel);
         }

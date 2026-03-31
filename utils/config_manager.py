@@ -1660,11 +1660,11 @@ class ConfigManager:
 
         # 文本模式回复长度守卫上限（字/词数，超限会丢弃并重试）
         try:
-            config['TEXT_GUARD_MAX_LENGTH'] = int(core_cfg.get('textGuardMaxLength', 300))
+            config['TEXT_GUARD_MAX_LENGTH'] = int(core_cfg.get('textGuardMaxLength', 450))
             if config['TEXT_GUARD_MAX_LENGTH'] <= 0:
-                config['TEXT_GUARD_MAX_LENGTH'] = 300
+                config['TEXT_GUARD_MAX_LENGTH'] = 450
         except (TypeError, ValueError):
-            config['TEXT_GUARD_MAX_LENGTH'] = 300
+            config['TEXT_GUARD_MAX_LENGTH'] = 450
         
         # 只有在启用自定义API时才允许覆盖各模型相关字段
         if enable_custom_api:

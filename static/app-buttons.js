@@ -626,9 +626,12 @@
             window.lastUserInputTime = Date.now();
             window.resetProactiveChatBackoff();
 
-            // Optional fast path: direct KB ask through user plugin (when enabled in Agent HUD)
+            // Knowledge-base direct mode: call knowledge_base.ask directly and
+            // deliver the answer through backend deliver_plugin_answer for TTS playback.
             var kbDirect = window.nekoKnowledgeBaseDirect;
             var kbDirectEnabled = !!(kbDirect && typeof kbDirect.isEnabled === 'function' && kbDirect.isEnabled());
+            var displayText = text;
+            var outboundText = text;
             if (kbDirectEnabled && text && !hasScreenshots) {
                 textSendButton.disabled = true;
                 textInputBox.disabled = true;
@@ -653,7 +656,6 @@
                         window.appendMessage(answer, 'gemini', true);
                     }
 
-                    // First user input check
                     if (window.appChat && window.appChat.isFirstUserInput()) {
                         window.appChat.markFirstUserInput();
                         console.log(window.t('console.userFirstInputDetected'));
@@ -783,20 +785,20 @@
                 }
 
                 // Then send text (if any)
-                if (text) {
+                if (outboundText) {
                     S.socket.send(JSON.stringify({
                         action: 'stream_data',
-                        data: text,
+                        data: outboundText,
                         input_type: 'text'
                     }));
 
                     textInputBox.value = '';
-                    window.appendMessage(text, 'user', true);
+                    window.appendMessage(displayText, 'user', true);
 
                     // Achievement: meow detection
                     if (window.incrementAchievementCounter) {
                         var meowPattern = /\u55B5|miao|meow|nya|\u306B\u3083/i;
-                        if (meowPattern.test(text)) {
+                        if (meowPattern.test(displayText)) {
                             try {
                                 window.incrementAchievementCounter('meowCount');
                             } catch (error) {

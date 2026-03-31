@@ -87,6 +87,18 @@
           style="margin-bottom: 12px"
         />
 
+        <div v-if="isKnowledgeBase" class="kb-quick-toggle">
+          <span class="kb-quick-toggle-title">RAG 混合模式</span>
+          <el-switch
+            v-model="ragMixedEnabled"
+            inline-prompt
+            active-text="开"
+            inactive-text="关"
+          />
+          <el-checkbox v-model="quoteFirstEnabled" :disabled="!ragMixedEnabled">引文优先</el-checkbox>
+          <span class="kb-quick-toggle-hint">开启=答案+原文片段，关闭=仅答案</span>
+        </div>
+
         <div class="diff-container">
           <div class="diff-header">
             <div class="diff-title">{{ t('plugins.currentEffectiveConfig') }}</div>
@@ -146,6 +158,7 @@ import {
   getPluginBaseConfig,
   getPluginProfilesState,
   getPluginProfileConfig,
+  updatePluginConfig,
   upsertPluginProfileConfig,
   deletePluginProfileConfig
 } from '@/api/config'
@@ -241,6 +254,50 @@ const activeProfileName = computed<string | null>(() => {
   const cfg = profilesState.value?.config_profiles
   const name = cfg?.active
   return typeof name === 'string' ? name : null
+})
+
+const isKnowledgeBase = computed(() => props.pluginId === 'knowledge_base')
+
+function readDraftRagMode(): string {
+  const draft = profileDraftConfig.value || {}
+  const kb = (draft.knowledge_base && typeof draft.knowledge_base === 'object')
+    ? (draft.knowledge_base as Record<string, any>)
+    : {}
+  return String(kb.rag_mode || 'answer_only').toLowerCase()
+}
+
+function writeDraftRagMode(mode: 'answer_only' | 'answer_plus_quotes' | 'quote_first') {
+  const current = profileDraftConfig.value || {}
+  const kb = (current.knowledge_base && typeof current.knowledge_base === 'object')
+    ? { ...(current.knowledge_base as Record<string, any>) }
+    : {}
+  kb.rag_mode = mode
+  profileDraftConfig.value = {
+    ...current,
+    knowledge_base: kb
+  }
+}
+
+const ragMixedEnabled = computed<boolean>({
+  get() {
+    const mode = readDraftRagMode()
+    return mode === 'answer_plus_quotes' || mode === 'quote_first'
+  },
+  set(enabled: boolean) {
+    writeDraftRagMode(enabled ? 'answer_plus_quotes' : 'answer_only')
+  }
+})
+
+const quoteFirstEnabled = computed<boolean>({
+  get() {
+    return readDraftRagMode() === 'quote_first'
+  },
+  set(enabled: boolean) {
+    if (!ragMixedEnabled.value) {
+      return
+    }
+    writeDraftRagMode(enabled ? 'quote_first' : 'answer_plus_quotes')
+  }
 })
 
 const hasChanges = computed(() => {
@@ -483,8 +540,10 @@ async function loadAll() {
     if (toSelect) {
       await loadProfileDraft(toSelect, currentVersion)
     } else {
-      profileDraftConfig.value = null
-      originalProfileConfig.value = null
+      // Bootstrap an editable draft so users can fill config even when no profile exists yet.
+      selectedProfileName.value = 'default'
+      profileDraftConfig.value = {}
+      originalProfileConfig.value = {}
     }
   } catch (e: any) {
     if (currentVersion !== loadVersion) return
@@ -564,16 +623,44 @@ function resetDraft() {
 }
 
 async function save() {
-  if (!props.pluginId || !selectedProfileName.value) return
+  if (!props.pluginId) return
+  const profileName = (selectedProfileName.value || 'default').trim()
+  selectedProfileName.value = profileName
 
   saving.value = true
   error.value = null
   try {
     await upsertPluginProfileConfig(
       props.pluginId,
-      selectedProfileName.value,
+      profileName,
       (profileDraftConfig.value || {}) as Record<string, any>,
       false
+    )
+
+    const basePlugin = (baseConfig.value && typeof baseConfig.value.plugin === 'object')
+      ? (baseConfig.value.plugin as Record<string, any>)
+      : {}
+    const effectivePlugin = (effectiveConfig.value && typeof effectiveConfig.value.plugin === 'object')
+      ? (effectiveConfig.value.plugin as Record<string, any>)
+      : {}
+    const pluginEntryFallback =
+      String(basePlugin.entry || effectivePlugin.entry || (props.pluginId === 'knowledge_base' ? 'plugin.plugins.knowledge_base:KnowledgeBasePlugin' : '')).trim()
+
+    const syncPayload: Record<string, any> = {
+      ...((profileDraftConfig.value || {}) as Record<string, any>),
+      plugin: {
+        ...(basePlugin || {}),
+        ...(effectivePlugin || {}),
+        id: String(basePlugin.id || effectivePlugin.id || props.pluginId || '').trim() || props.pluginId,
+        ...(pluginEntryFallback ? { entry: pluginEntryFallback } : {})
+      }
+    }
+
+    // Keep plugin.toml synchronized with the latest draft so form edits persist
+    // even when users only interact with the profile editor UI.
+    await updatePluginConfig(
+      props.pluginId,
+      syncPayload
     )
 
     ElMessage.success(t('common.success'))
@@ -587,7 +674,7 @@ async function save() {
     originalProfileConfig.value = deepClone(profileDraftConfig.value || {})
 
     // 仅当当前浏览的 profile 正好是激活中的 profile 时，才提示热更新或重载插件
-    const isActive = activeProfileName.value === selectedProfileName.value
+    const isActive = activeProfileName.value === profileName
     if (isActive) {
       try {
         // 提供热更新选项
@@ -742,6 +829,27 @@ watch(
 
 .preview-pane {
   flex: 1 1 auto;
+}
+
+.kb-quick-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-lighter);
+}
+
+.kb-quick-toggle-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.kb-quick-toggle-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .preview-card {

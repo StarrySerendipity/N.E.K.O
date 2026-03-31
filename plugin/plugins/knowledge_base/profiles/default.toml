@@ -1,5 +1,6 @@
 [knowledge_base]
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-api_key = "sk-a9df1361a6a24bdb8d86efa4174a133a"
-chat_model = "qwen-vl-max"
-embedding_model = "qwen3-vl-embedding"
+base_url = "sk-swimsjmrstgxwrdjegvvztwaaqqihxtpmvbruxivovhxmzxl"
+api_key = "https://api.siliconflow.cn/v1"
+chat_model = "zai-org/GLM-4.6V"
+embedding_model = "Qwen/Qwen3-Embedding-8B"
+rag_mode = "quote_first"

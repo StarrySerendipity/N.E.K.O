@@ -333,14 +333,17 @@
         audioBuffer.copyToChannel(float32Data, 0);
 
         var bufferObj = { seq: S.seqCounter++, buffer: audioBuffer };
-        S.audioBufferQueue.push(bufferObj);
-
-        var j = S.audioBufferQueue.length - 1;
-        while (j > 0 && S.audioBufferQueue[j].seq < S.audioBufferQueue[j - 1].seq) {
-            var tmp = S.audioBufferQueue[j];
-            S.audioBufferQueue[j] = S.audioBufferQueue[j - 1];
-            S.audioBufferQueue[j - 1] = tmp;
-            j--;
+        if (S.audioBufferQueue.length === 0 || S.audioBufferQueue[S.audioBufferQueue.length - 1].seq <= bufferObj.seq) {
+            S.audioBufferQueue.push(bufferObj);
+        } else {
+            S.audioBufferQueue.push(bufferObj);
+            var j = S.audioBufferQueue.length - 1;
+            while (j > 0 && S.audioBufferQueue[j].seq < S.audioBufferQueue[j - 1].seq) {
+                var tmp = S.audioBufferQueue[j];
+                S.audioBufferQueue[j] = S.audioBufferQueue[j - 1];
+                S.audioBufferQueue[j - 1] = tmp;
+                j--;
+            }
         }
 
         if (!S.isPlaying) {
@@ -378,6 +381,13 @@
             speechId: meta.speechId,
             epoch: meta.epoch
         });
+        var maxIncoming = C.MAX_INCOMING_AUDIO_BLOBS || 120;
+        if (S.incomingAudioBlobQueue.length > maxIncoming) {
+            S.incomingAudioBlobQueue.splice(0, S.incomingAudioBlobQueue.length - maxIncoming);
+            if (window.DEBUG_AUDIO) {
+                console.warn('[Audio] incomingAudioBlobQueue overflow, dropped oldest blobs');
+            }
+        }
         if (!S.isProcessingIncomingAudioBlob) {
             void processIncomingAudioBlobQueue();
         }

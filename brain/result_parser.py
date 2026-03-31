@@ -93,7 +93,7 @@ def _format_error(error: Any, lang: str) -> str:
     return _try_extract_error_message(s, lang)
 
 
-def _truncate(s: str, limit: int = 300) -> str:
+def _truncate(s: str, limit: int = 1200) -> str:
     if len(s) <= limit:
         return s
     return s[:limit] + "…"

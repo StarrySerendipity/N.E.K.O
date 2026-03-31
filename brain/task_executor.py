@@ -200,6 +200,94 @@ class DirectTaskExecutor:
                 lines.extend(param_desc)
         
         return "\n".join(lines)
+
+    def _extract_kb_question(self, raw: str) -> str:
+        s = (raw or "").strip()
+        if not s:
+            return ""
+        patterns = [
+            r"^基于用户插件knowledge_base回答[:：]\s*(.+)$",
+            r"^knowledge_base\s*[:：]\s*(.+)$",
+            r"^我试试knowledge_base(?:显示|回答|回复|问答)[,，:：]\s*(.+)$",
+            r"^knowledge_base\s+ask\s*[:：]\s*(.+)$",
+        ]
+        for pat in patterns:
+            m = re.match(pat, s, flags=re.IGNORECASE)
+            if m:
+                return (m.group(1) or "").strip()
+        return ""
+
+    def _extract_kb_question_from_conversation(self, raw_conv: str) -> str:
+        conv = str(raw_conv or "")
+        if not conv:
+            return ""
+        candidates: List[str] = []
+        for line in conv.splitlines():
+            line_text = line.strip()
+            if not line_text:
+                continue
+            q = self._extract_kb_question(line_text)
+            if q:
+                candidates.append(q)
+                continue
+            m = re.search(r"knowledge_base\s*(?:回答|回复|问答|ask)?\s*[:：]\s*(.+)$", line_text, flags=re.IGNORECASE)
+            if m:
+                q2 = (m.group(1) or "").strip()
+                if q2:
+                    candidates.append(q2)
+        return candidates[-1] if candidates else ""
+
+    def _build_kb_fastpath_decision(self, conversation: str, plugins: Any) -> Optional[UserPluginDecision]:
+        """Build deterministic knowledge_base fast-path decision without any LLM call."""
+        try:
+            user_intent = ""
+            conv_lines = str(conversation or "").splitlines()
+            for line in conv_lines:
+                if line.startswith("LATEST_USER_REQUEST:"):
+                    user_intent = line[len("LATEST_USER_REQUEST:"):].strip()
+                    break
+            if not user_intent:
+                for line in reversed(conv_lines):
+                    if line.startswith("user:") or line.startswith("User:"):
+                        user_intent = line[5:].strip()
+                        break
+
+            fast_q = self._extract_kb_question(user_intent) or self._extract_kb_question_from_conversation(conversation)
+            if not fast_q:
+                return None
+
+            # Prefer strict metadata check when plugin list is available.
+            if plugins:
+                kb_plugin = None
+                kb_has_ask = False
+                p_iter = plugins.items() if isinstance(plugins, dict) else enumerate(plugins)
+                for _, p in p_iter:
+                    if not isinstance(p, dict):
+                        continue
+                    if p.get("id") != "knowledge_base":
+                        continue
+                    kb_plugin = p
+                    for e in (p.get("entries") or []):
+                        if isinstance(e, dict) and e.get("id") == "ask":
+                            kb_has_ask = True
+                            break
+                    break
+
+                if not (kb_plugin and kb_has_ask):
+                    return None
+
+            return UserPluginDecision(
+                has_task=True,
+                can_execute=True,
+                task_description=f"knowledge_base ask: {fast_q[:80]}",
+                plugin_id="knowledge_base",
+                entry_id="ask",
+                plugin_args={"question": fast_q, "top_k": 4},
+                reason="fast_path_explicit_kb",
+            )
+        except Exception as e:
+            logger.debug("[UserPlugin Assessment] fast-path build failed: %s", e)
+            return None
     
     async def _assess_computer_use(
         self, 
@@ -578,51 +666,11 @@ Return only the JSON object, nothing else.
 
         # Deterministic fast path: explicit knowledge_base invocation from UI prompt wrapper.
         # This avoids an extra LLM assessment round and starts plugin execution immediately.
-        try:
-            kb_plugin = None
-            kb_has_ask = False
-            p_iter = plugins.items() if isinstance(plugins, dict) else enumerate(plugins)
-            for _, p in p_iter:
-                if not isinstance(p, dict):
-                    continue
-                if p.get("id") != "knowledge_base":
-                    continue
-                kb_plugin = p
-                for e in (p.get("entries") or []):
-                    if isinstance(e, dict) and e.get("id") == "ask":
-                        kb_has_ask = True
-                        break
-                break
-
-            def _extract_kb_question(raw: str) -> str:
-                s = (raw or "").strip()
-                if not s:
-                    return ""
-                patterns = [
-                    r"^基于用户插件knowledge_base回答[:：]\s*(.+)$",
-                    r"^knowledge_base\s*[:：]\s*(.+)$",
-                    r"^我试试knowledge_base(?:显示|回答)[,，:：]\s*(.+)$",
-                ]
-                for pat in patterns:
-                    m = re.match(pat, s, flags=re.IGNORECASE)
-                    if m:
-                        return (m.group(1) or "").strip()
-                return ""
-
-            fast_q = _extract_kb_question(user_intent)
-            if kb_plugin and kb_has_ask and fast_q:
-                logger.info("[UserPlugin Assessment] Fast-path to knowledge_base.ask, q_len=%d", len(fast_q))
-                return UserPluginDecision(
-                    has_task=True,
-                    can_execute=True,
-                    task_description=f"knowledge_base ask: {fast_q[:80]}",
-                    plugin_id="knowledge_base",
-                    entry_id="ask",
-                    plugin_args={"question": fast_q, "top_k": 4},
-                    reason="fast_path_explicit_kb",
-                )
-        except Exception as e:
-            logger.debug("[UserPlugin Assessment] fast-path check failed: %s", e)
+        fast_path_decision = self._build_kb_fastpath_decision(conversation, plugins)
+        if fast_path_decision is not None:
+            q = ((fast_path_decision.plugin_args or {}).get("question") or "")
+            logger.info("[UserPlugin Assessment] Fast-path to knowledge_base.ask, q_len=%d", len(q))
+            return fast_path_decision
 
         user_prompt = f"Conversation:\n{conversation}\n\nUser intent (one-line): {user_intent}"
 
@@ -905,11 +953,45 @@ Return only the JSON object, nothing else.
         # user plugin 支路（由外部 provider 提供插件列表）
         plugins = []
         if user_plugin_enabled:
+            # Highest-priority path: explicit knowledge_base prompt should dispatch immediately,
+            # even when plugin registry is still warming up after restart.
+            fast_path_decision = self._build_kb_fastpath_decision(conversation, None)
+            if fast_path_decision is not None:
+                logger.info("[TaskExecutor] Immediate dispatch via knowledge_base fast-path (pre-registry)")
+                return TaskResult(
+                    task_id=task_id,
+                    has_task=True,
+                    task_description=fast_path_decision.task_description,
+                    execution_method='user_plugin',
+                    success=False,
+                    tool_name=fast_path_decision.plugin_id,
+                    tool_args=fast_path_decision.plugin_args,
+                    entry_id=fast_path_decision.entry_id,
+                    reason=fast_path_decision.reason,
+                )
+
             # Fast path: use cached plugin list first to reduce per-turn startup latency.
             await self.plugin_list_provider(force_refresh=False)
             if not self.plugin_list:
                 await self.plugin_list_provider(force_refresh=True)
             plugins = self.plugin_list
+
+            # Priority short-circuit: explicit knowledge_base instruction should dispatch immediately.
+            # Do not wait for other branch assessments (which may involve extra LLM calls).
+            fast_path_decision = self._build_kb_fastpath_decision(conversation, plugins)
+            if fast_path_decision is not None:
+                logger.info("[TaskExecutor] Immediate dispatch via knowledge_base fast-path")
+                return TaskResult(
+                    task_id=task_id,
+                    has_task=True,
+                    task_description=fast_path_decision.task_description,
+                    execution_method='user_plugin',
+                    success=False,
+                    tool_name=fast_path_decision.plugin_id,
+                    tool_args=fast_path_decision.plugin_args,
+                    entry_id=fast_path_decision.entry_id,
+                    reason=fast_path_decision.reason,
+                )
 
         if user_plugin_enabled and plugins:
             assessment_tasks.append(('up', self._assess_user_plugin(conversation, plugins)))
@@ -1114,7 +1196,7 @@ Return only the JSON object, nothing else.
                 logger.debug(f"[UserPlugin] Skipped malformed plugin entry during lookup: {p}", exc_info=True)
                 continue
         
-        if plugin_meta is None:
+        if plugin_meta is None and plugin_id != "knowledge_base":
             return TaskResult(
                 task_id=task_id,
                 has_task=True,
@@ -1126,6 +1208,11 @@ Return only the JSON object, nothing else.
                 tool_args=plugin_args,
                 reason=reason or "Plugin not found"
             )
+
+        # knowledge_base is built-in and may be temporarily absent from /plugins during lifecycle warm-up.
+        # Allow blind dispatch to /runs so explicit KB requests don't get blocked by transient registry lag.
+        if plugin_meta is None and plugin_id == "knowledge_base":
+            logger.warning("[UserPlugin] knowledge_base not present in plugin list snapshot, continue with blind /runs dispatch")
 
         # Strict entry_id validation: only allow case-insensitive exact match as minor tolerance.
         if plugin_entry_id and plugin_meta:
