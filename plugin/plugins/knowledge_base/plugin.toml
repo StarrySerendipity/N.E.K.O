@@ -1,0 +1,34 @@
+[plugin]
+name = "极简知识库"
+description = "上传多个文档（Markdown/PDF），支持分类文件夹管理与检索增强问答（硅基流动）"
+version = "0.7.0"
+id = "knowledge_base"
+entry = "plugin.plugins.knowledge_base:KnowledgeBasePlugin"
+
+[plugin.author]
+name = "N.E.K.O Team"
+
+[plugin.sdk]
+recommended = ">=0.1.0,<0.2.0"
+supported = ">=0.1.0,<0.3.0"
+
+[plugin_runtime]
+enabled = true
+auto_start = true
+
+[plugin.store]
+enabled = false
+
+[knowledge_base]
+base_url = ""
+api_key = ""
+chat_model = ""
+embedding_model = ""
+rag_mode = "answer_only"
+doc_top_n = 1
+context_budget_chars = 14000
+hybrid_alpha = 0.68
+strict_embedding = true
+rerank_enabled = true
+rerank_model = "BAAI/bge-reranker-v2-m3"
+rerank_top_n = 36

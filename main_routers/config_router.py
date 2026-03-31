@@ -1,0 +1,957 @@
+# -*- coding: utf-8 -*-
+"""
+Config Router
+
+Handles configuration-related API endpoints including:
+- User preferences
+- API configuration (core and custom APIs)
+- Steam language settings
+- API providers
+"""
+
+import json
+import os
+import threading
+import urllib.parse
+from pathlib import Path
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+from .shared_state import get_config_manager, get_steamworks, get_session_manager, get_initialize_character_data
+from .characters_router import get_current_live2d_model
+from utils.file_utils import atomic_write_json
+from utils.preferences import load_user_preferences, update_model_preferences, validate_model_preferences, move_model_to_top, load_global_conversation_settings, save_global_conversation_settings, GLOBAL_CONVERSATION_KEY
+from utils.logger_config import get_module_logger
+from utils.config_manager import get_reserved
+from config import (
+    CHARACTER_SYSTEM_RESERVED_FIELDS,
+    CHARACTER_WORKSHOP_RESERVED_FIELDS,
+    CHARACTER_RESERVED_FIELDS,
+)
+
+
+router = APIRouter(prefix="/api/config", tags=["config"])
+
+# --- proxy mode helpers ---
+_PROXY_LOCK = threading.Lock()
+_proxy_snapshot: dict[str, str] = {}
+logger = get_module_logger(__name__, "Main")
+
+# VRM 模型路径常量
+VRM_STATIC_PATH = "/static/vrm"  # 项目目录下的 VRM 模型路径
+VRM_USER_PATH = "/user_vrm"  # 用户文档目录下的 VRM 模型路径
+
+# MMD 模型路径常量
+MMD_STATIC_PATH = "/static/mmd"  # 项目目录下的 MMD 模型路径
+MMD_USER_PATH = "/user_mmd"  # 用户文档目录下的 MMD 模型路径
+
+_KB_PLUGIN_ID = "knowledge_base"
+_KB_DEFAULT_PROFILE = "default"
+
+
+def _normalize_kb_config(raw: object) -> dict[str, str]:
+    root_cfg = raw if isinstance(raw, dict) else {}
+    kb_cfg_obj = root_cfg.get("knowledge_base") if isinstance(root_cfg, dict) else {}
+    kb_cfg = kb_cfg_obj if isinstance(kb_cfg_obj, dict) else {}
+    return {
+        "base_url": str(kb_cfg.get("base_url", "")).strip(),
+        "api_key": str(kb_cfg.get("api_key", "")).strip(),
+        "chat_model": str(kb_cfg.get("chat_model", "")).strip(),
+        "embedding_model": str(kb_cfg.get("embedding_model", "")).strip(),
+    }
+
+
+async def _fetch_plugin_config_effective_and_profile() -> tuple[dict[str, str], str]:
+    import httpx
+    from config import USER_PLUGIN_SERVER_PORT
+
+    base_url = f"http://127.0.0.1:{USER_PLUGIN_SERVER_PORT}"
+    async with httpx.AsyncClient(timeout=10, proxy=None, trust_env=False) as client:
+        config_resp = await client.get(f"{base_url}/plugin/{_KB_PLUGIN_ID}/config")
+        config_resp.raise_for_status()
+        config_payload = config_resp.json() if config_resp.content else {}
+        cfg_obj = config_payload.get("config") if isinstance(config_payload, dict) else {}
+        normalized = _normalize_kb_config(cfg_obj)
+
+        profile_resp = await client.get(f"{base_url}/plugin/{_KB_PLUGIN_ID}/config/profiles")
+        profile_resp.raise_for_status()
+        profile_payload = profile_resp.json() if profile_resp.content else {}
+        profiles_obj = profile_payload.get("config_profiles") if isinstance(profile_payload, dict) else None
+        profiles = profiles_obj if isinstance(profiles_obj, dict) else {}
+        active_obj = profiles.get("active")
+        profile_name = active_obj.strip() if isinstance(active_obj, str) and active_obj.strip() else _KB_DEFAULT_PROFILE
+
+    return normalized, profile_name
+
+
+@router.get("/character_reserved_fields")
+async def get_character_reserved_fields():
+    """返回角色档案保留字段配置（供前端与路由统一使用）。"""
+    return {
+        "success": True,
+        "system_reserved_fields": list(CHARACTER_SYSTEM_RESERVED_FIELDS),
+        "workshop_reserved_fields": list(CHARACTER_WORKSHOP_RESERVED_FIELDS),
+        "all_reserved_fields": list(CHARACTER_RESERVED_FIELDS),
+    }
+
+
+# MMD 文件扩展名
+_MMD_EXTENSIONS = {'.pmx', '.pmd'}
+
+
+def _get_live3d_sub_type(catgirl_config: dict) -> str:
+    """判断 Live3D 模式下应使用 VRM 还是 MMD 渲染器。
+    优先检查 MMD 路径（因为 VRM 是旧字段，可能遗留非空值）。"""
+    mmd_path = get_reserved(catgirl_config, 'avatar', 'mmd', 'model_path', default='')
+    if mmd_path:
+        return 'mmd'
+    vrm_path = get_reserved(catgirl_config, 'avatar', 'vrm', 'model_path', default='', legacy_keys=('vrm',))
+    if vrm_path:
+        return 'vrm'
+    return ''
+
+
+def _resolve_vrm_path(vrm_path: str, _config_manager, target_name: str) -> str:
+    """解析 VRM 模型路径，验证文件存在性，返回可用 URL 或空字符串。"""
+    if vrm_path.startswith('http://') or vrm_path.startswith('https://'):
+        logger.debug(f"获取页面配置 - 角色: {target_name}, VRM模型HTTP路径: {vrm_path}")
+        return vrm_path
+    elif vrm_path.startswith('/'):
+        _vrm_file_verified = False
+        if vrm_path.startswith(VRM_USER_PATH + '/'):
+            _fname = vrm_path[len(VRM_USER_PATH) + 1:]
+            _vrm_file_verified = (_config_manager.vrm_dir / _fname).exists()
+        elif vrm_path.startswith(VRM_STATIC_PATH + '/'):
+            _fname = vrm_path[len(VRM_STATIC_PATH) + 1:]
+            _vrm_file_verified = (_config_manager.project_root / 'static' / 'vrm' / _fname).exists()
+        else:
+            _vrm_file_verified = True
+        if _vrm_file_verified:
+            logger.debug(f"获取页面配置 - 角色: {target_name}, VRM模型绝对路径: {vrm_path}")
+            return vrm_path
+        else:
+            logger.warning(f"获取页面配置 - 角色: {target_name}, VRM模型文件未找到: {vrm_path}")
+            return ""
+    else:
+        from pathlib import PurePosixPath
+        safe_rel = PurePosixPath(vrm_path)
+        if safe_rel.is_absolute() or '..' in safe_rel.parts:
+            logger.warning(f"获取页面配置 - 角色: {target_name}, VRM路径不合法: {vrm_path}")
+            return ""
+        project_vrm_path = _config_manager.project_root / 'static' / 'vrm' / str(safe_rel)
+        if project_vrm_path.exists():
+            result = f'{VRM_STATIC_PATH}/{safe_rel}'
+            logger.debug(f"获取页面配置 - 角色: {target_name}, VRM模型在项目目录: {vrm_path} -> {result}")
+            return result
+        user_vrm_path = _config_manager.vrm_dir / str(safe_rel)
+        if user_vrm_path.exists():
+            result = f'{VRM_USER_PATH}/{safe_rel}'
+            logger.debug(f"获取页面配置 - 角色: {target_name}, VRM模型在用户目录: {vrm_path} -> {result}")
+            return result
+        logger.warning(f"获取页面配置 - 角色: {target_name}, VRM模型文件未找到: {vrm_path}")
+        return ""
+
+
+def _resolve_mmd_path(mmd_path: str, _config_manager, target_name: str) -> str:
+    """解析 MMD 模型路径，验证文件存在性，返回可用 URL 或空字符串。"""
+    if mmd_path.startswith('http://') or mmd_path.startswith('https://'):
+        logger.debug(f"获取页面配置 - 角色: {target_name}, MMD模型HTTP路径: {mmd_path}")
+        return mmd_path
+    elif mmd_path.startswith('/'):
+        _mmd_file_verified = False
+        if mmd_path.startswith(MMD_USER_PATH + '/'):
+            _fname = mmd_path[len(MMD_USER_PATH) + 1:]
+            _mmd_file_verified = (_config_manager.mmd_dir / _fname).exists()
+        elif mmd_path.startswith(MMD_STATIC_PATH + '/'):
+            _fname = mmd_path[len(MMD_STATIC_PATH) + 1:]
+            _mmd_file_verified = (_config_manager.project_root / 'static' / 'mmd' / _fname).exists()
+        else:
+            _mmd_file_verified = True
+        if _mmd_file_verified:
+            logger.debug(f"获取页面配置 - 角色: {target_name}, MMD模型绝对路径: {mmd_path}")
+            return mmd_path
+        else:
+            logger.warning(f"获取页面配置 - 角色: {target_name}, MMD模型文件未找到: {mmd_path}")
+            return ""
+    else:
+        from pathlib import PurePosixPath
+        safe_rel = PurePosixPath(mmd_path)
+        if safe_rel.is_absolute() or '..' in safe_rel.parts:
+            logger.warning(f"获取页面配置 - 角色: {target_name}, MMD路径不合法: {mmd_path}")
+            return ""
+        project_mmd_path = _config_manager.project_root / 'static' / 'mmd' / str(safe_rel)
+        if project_mmd_path.exists():
+            result = f'{MMD_STATIC_PATH}/{safe_rel}'
+            logger.debug(f"获取页面配置 - 角色: {target_name}, MMD模型在项目目录: {mmd_path} -> {result}")
+            return result
+        user_mmd_path = _config_manager.mmd_dir / str(safe_rel)
+        if user_mmd_path.exists():
+            result = f'{MMD_USER_PATH}/{safe_rel}'
+            logger.debug(f"获取页面配置 - 角色: {target_name}, MMD模型在用户目录: {mmd_path} -> {result}")
+            return result
+        logger.warning(f"获取页面配置 - 角色: {target_name}, MMD模型文件未找到: {mmd_path}")
+        return ""
+
+
+@router.get("/page_config")
+async def get_page_config(lanlan_name: str = ""):
+    """获取页面配置(lanlan_name 和 model_path),支持Live2D、VRM和MMD(Live3D)模型"""
+    try:
+        # 获取角色数据
+        _config_manager = get_config_manager()
+        _, her_name, _, lanlan_basic_config, _, _, _, _, _ = _config_manager.get_character_data()
+        
+        # 如果提供了 lanlan_name 参数，使用它；否则使用当前角色
+        target_name = lanlan_name if lanlan_name else her_name
+        
+        # 获取角色配置
+        catgirl_config = lanlan_basic_config.get(target_name, {})
+        model_type = get_reserved(catgirl_config, 'avatar', 'model_type', default='live2d', legacy_keys=('model_type',))
+        # 归一化：旧配置中的 'vrm' 统一为 'live3d'
+        if model_type == 'vrm':
+            model_type = 'live3d'
+        
+        model_path = ""
+        # live3d_sub_type: 前端用于区分 Live3D 模式下加载 VRM 还是 MMD 渲染器
+        live3d_sub_type = ""
+        
+        # 根据模型类型获取模型路径
+        if model_type == 'live3d' and _get_live3d_sub_type(catgirl_config) == 'vrm':
+            live3d_sub_type = 'vrm'
+            # VRM模型：处理路径转换
+            vrm_path = get_reserved(catgirl_config, 'avatar', 'vrm', 'model_path', default='', legacy_keys=('vrm',))
+            if vrm_path:
+                model_path = _resolve_vrm_path(vrm_path, _config_manager, target_name)
+            else:
+                logger.warning(f"角色 {target_name} 的VRM模型路径为空")
+        elif model_type == 'live3d' and _get_live3d_sub_type(catgirl_config) == 'mmd':
+            live3d_sub_type = 'mmd'
+            # MMD模型：处理路径转换
+            mmd_path = get_reserved(catgirl_config, 'avatar', 'mmd', 'model_path', default='')
+            if mmd_path:
+                model_path = _resolve_mmd_path(mmd_path, _config_manager, target_name)
+            else:
+                logger.warning(f"角色 {target_name} 的MMD模型路径为空")
+        elif model_type == 'live3d':
+            # live3d 但无法判断子类型（两个路径都为空），返回空路径
+            live3d_sub_type = ''
+            logger.warning(f"角色 {target_name} 的Live3D模型路径均为空")
+        else:
+            # Live2D模型：使用原有逻辑
+            live2d = get_reserved(catgirl_config, 'avatar', 'live2d', 'model_path', default='mao_pro', legacy_keys=('live2d',))
+            live2d_item_id = get_reserved(
+                catgirl_config,
+                'avatar',
+                'asset_source_id',
+                default='',
+                legacy_keys=('live2d_item_id', 'item_id'),
+            )
+            
+            logger.debug(f"获取页面配置 - 角色: {target_name}, Live2D模型: {live2d}, item_id: {live2d_item_id}")
+        
+            model_response = await get_current_live2d_model(target_name, live2d_item_id)
+            # 提取JSONResponse中的内容
+            model_data = model_response.body.decode('utf-8')
+            model_json = json.loads(model_data)
+            model_info = model_json.get('model_info', {})
+            model_path = model_info.get('path', '')
+        
+        result = {
+            "success": True,
+            "lanlan_name": target_name,
+            "model_path": model_path,
+            "model_type": model_type
+        }
+        if model_type == 'live3d':
+            result["live3d_sub_type"] = live3d_sub_type
+        return result
+    except Exception as e:
+        logger.error(f"获取页面配置失败: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "lanlan_name": "",
+            "model_path": "",
+            "model_type": ""
+        }
+
+
+@router.get("/preferences")
+async def get_preferences():
+    """获取用户偏好设置"""
+    preferences = load_user_preferences()
+    return preferences
+
+
+@router.post("/preferences")
+async def save_preferences(request: Request):
+    """保存用户偏好设置"""
+    try:
+        data = await request.json()
+        if not data:
+            return {"success": False, "error": "无效的数据"}
+        
+        # 验证偏好数据
+        if not validate_model_preferences(data):
+            return {"success": False, "error": "偏好数据格式无效"}
+        
+        # 防止使用保留的全局对话设置键作为模型路径
+        if data.get('model_path') == GLOBAL_CONVERSATION_KEY:
+            return {"success": False, "error": "model_path 不能使用保留键"}
+        
+        # 获取参数（可选）
+        parameters = data.get('parameters')
+        # 获取显示器信息（可选，用于多屏幕位置恢复）
+        display = data.get('display')
+        # 获取旋转信息（可选，用于VRM模型朝向）
+        rotation = data.get('rotation')
+        # 获取视口信息（可选，用于跨分辨率位置和缩放归一化）
+        viewport = data.get('viewport')
+        # 获取相机位置信息（可选，用于恢复VRM滚轮缩放状态）
+        camera_position = data.get('camera_position')
+
+        # 验证和清理 viewport 数据
+        if viewport is not None:
+            if not isinstance(viewport, dict):
+                viewport = None
+            else:
+                # 验证必需的数值字段
+                width = viewport.get('width')
+                height = viewport.get('height')
+                if not (isinstance(width, (int, float)) and isinstance(height, (int, float)) and
+                        width > 0 and height > 0):
+                    viewport = None
+
+        # 更新偏好
+        if update_model_preferences(data['model_path'], data['position'], data['scale'], parameters, display, rotation, viewport, camera_position):
+            return {"success": True, "message": "偏好设置已保存"}
+        else:
+            return {"success": False, "error": "保存失败"}
+            
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+
+@router.post("/preferences/set-preferred")
+async def set_preferred_model(request: Request):
+    """设置首选模型"""
+    try:
+        data = await request.json()
+        if not data or 'model_path' not in data:
+            return {"success": False, "error": "无效的数据"}
+        
+        if move_model_to_top(data['model_path']):
+            return {"success": True, "message": "首选模型已更新"}
+        else:
+            return {"success": False, "error": "模型不存在或更新失败"}
+            
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/conversation-settings")
+async def get_conversation_settings():
+    """获取全局对话设置（从 user_preferences.json 同步备份中读取）"""
+    try:
+        settings = load_global_conversation_settings()
+        return {"success": True, "settings": settings}
+    except Exception as e:
+        logger.exception(f"获取对话设置失败: {e}")
+        return {"success": False, "error": "Internal server error", "settings": {}}
+
+
+@router.post("/conversation-settings")
+async def save_conversation_settings(request: Request):
+    """保存全局对话设置（同步到 user_preferences.json 备份）"""
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return {"success": False, "error": "请求体必须为对象"}
+
+        if save_global_conversation_settings(data):
+            return {"success": True, "message": "对话设置已保存"}
+        else:
+            return {"success": False, "error": "保存失败"}
+    except Exception as e:
+        logger.exception(f"保存对话设置失败: {e}")
+        return {"success": False, "error": "Internal server error"}
+
+
+@router.get("/steam_language")
+async def get_steam_language():
+    """获取 Steam 客户端的语言设置和 GeoIP 信息，用于前端 i18n 初始化和区域检测
+    
+    返回字段：
+    - success: 是否成功
+    - steam_language: Steam 原始语言设置
+    - i18n_language: 归一化的 i18n 语言代码
+    - ip_country: 用户 IP 所在国家代码（如 "CN"）
+    - is_mainland_china: 是否为中国大陆用户（基于语言设置存在 + IP 为 CN）
+    
+    判断逻辑：
+    - 如果存在 Steam 语言设置（即有 Steam 环境），则检查 GeoIP
+    - 如果 IP 国家代码为 "CN"，则标记为中国大陆用户
+    - 如果不存在 Steam 语言设置（无 Steam 环境），默认为非大陆用户
+    """
+    from utils.language_utils import normalize_language_code
+    
+    try:
+        steamworks = get_steamworks()
+        
+        if steamworks is None:
+            # 没有 Steam 环境，默认为非大陆用户
+            return {
+                "success": False,
+                "error": "Steamworks 未初始化",
+                "steam_language": None,
+                "i18n_language": None,
+                "ip_country": None,
+                "is_mainland_china": False  # 无 Steam 环境，默认非大陆
+            }
+        
+        # 获取 Steam 当前游戏语言
+        steam_language = steamworks.Apps.GetCurrentGameLanguage()
+        # Steam API 可能返回 bytes，需要解码为字符串
+        if isinstance(steam_language, bytes):
+            steam_language = steam_language.decode('utf-8')
+        
+        # 使用 language_utils 的归一化函数，统一映射逻辑
+        # format='full' 返回 'zh-CN', 'zh-TW', 'en', 'ja', 'ko' 格式（用于前端 i18n）
+        i18n_language = normalize_language_code(steam_language, format='full')
+        
+        # 获取用户 IP 所在国家（用于判断是否为中国大陆用户）
+        ip_country = None
+        is_mainland_china = False
+        
+        try:
+            # 使用 Steam Utils API 获取用户 IP 所在国家
+            raw_ip_country = steamworks.Utils.GetIPCountry()
+            
+            if isinstance(raw_ip_country, bytes):
+                ip_country = raw_ip_country.decode('utf-8')
+            else:
+                ip_country = raw_ip_country
+            
+            if ip_country:
+                ip_country = ip_country.upper()
+                is_mainland_china = (ip_country == "CN")
+            
+            if not getattr(get_steam_language, '_logged', False) or not get_steam_language._logged:
+                get_steam_language._logged = True
+                logger.info(f"[GeoIP] 用户 IP 地区: {ip_country}, 是否大陆: {is_mainland_china}")
+            # Write Steam result to ConfigManager's steam-specific cache
+            try:
+                from utils.config_manager import ConfigManager
+                ConfigManager._steam_check_cache = not is_mainland_china
+                ConfigManager._region_cache = None  # reset combined cache for recomputation
+            except Exception:
+                pass
+        except Exception as geo_error:
+            get_steam_language._logged = False
+            logger.warning(f"[GeoIP] 获取用户 IP 地区失败: {geo_error}，默认为非大陆用户")
+            ip_country = None
+            is_mainland_china = False
+        
+        return {
+            "success": True,
+            "steam_language": steam_language,
+            "i18n_language": i18n_language,
+            "ip_country": ip_country,
+            "is_mainland_china": is_mainland_china
+        }
+        
+    except Exception as e:
+        logger.error(f"获取 Steam 语言设置失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "steam_language": None,
+            "i18n_language": None,
+            "ip_country": None,
+            "is_mainland_china": False  # 发生错误时，默认非大陆
+        }
+
+
+@router.get("/user_language")
+async def get_user_language_api():
+    """
+    获取用户语言设置（供前端字幕模块使用）
+    
+    优先级：Steam设置 > 系统设置
+    返回归一化的语言代码（'zh', 'en', 'ja'）
+    """
+    from utils.language_utils import get_global_language
+    
+    try:
+        # 使用 language_utils 的全局语言管理，自动处理 Steam/系统语言优先级
+        language = get_global_language()
+        
+        return {
+            "success": True,
+            "language": language
+        }
+        
+    except Exception as e:
+        logger.error(f"获取用户语言设置失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "language": "zh"  # 默认中文
+        }
+
+
+
+@router.get("/core_api")
+async def get_core_config_api():
+    """获取核心配置（API Key）"""
+    try:
+        # 尝试从core_config.json读取
+        try:
+            from utils.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            core_config_path = str(config_manager.get_config_path('core_config.json'))
+            with open(core_config_path, 'r', encoding='utf-8') as f:
+                core_cfg = json.load(f)
+                api_key = core_cfg.get('coreApiKey', '')
+        except FileNotFoundError:
+            # 如果文件不存在，返回当前配置中的CORE_API_KEY
+            _config_manager = get_config_manager()
+            core_config = _config_manager.get_core_config()
+            api_key = core_config.get('CORE_API_KEY','')
+            # 创建空的配置对象用于返回默认值
+            core_cfg = {}
+        
+        return {
+            "api_key": api_key,
+            "coreApi": core_cfg.get('coreApi', 'qwen'),
+            "assistApi": core_cfg.get('assistApi', 'qwen'),
+            "assistApiKeyQwen": core_cfg.get('assistApiKeyQwen', ''),
+            "assistApiKeyOpenai": core_cfg.get('assistApiKeyOpenai', ''),
+            "assistApiKeyGlm": core_cfg.get('assistApiKeyGlm', ''),
+            "assistApiKeyStep": core_cfg.get('assistApiKeyStep', ''),
+            "assistApiKeySilicon": core_cfg.get('assistApiKeySilicon', ''),
+            "assistApiKeyGemini": core_cfg.get('assistApiKeyGemini', ''),
+            "assistApiKeyKimi": core_cfg.get('assistApiKeyKimi', ''),
+            "assistApiKeyDeepseek": core_cfg.get('assistApiKeyDeepseek', ''),
+            "assistApiKeyDoubao": core_cfg.get('assistApiKeyDoubao', ''),
+            "assistApiKeyMinimax": core_cfg.get('assistApiKeyMinimax', ''),
+            "assistApiKeyMinimaxIntl": core_cfg.get('assistApiKeyMinimaxIntl', ''),
+            "assistApiKeyGrok": core_cfg.get('assistApiKeyGrok', ''),
+            "mcpToken": core_cfg.get('mcpToken', ''),
+            "enableCustomApi": core_cfg.get('enableCustomApi', False),
+            # 自定义API相关字段（Provider / Url / Id / ApiKey per model type）
+            **{
+                f'{mt}Model{suffix}': core_cfg.get(f'{mt}Model{suffix}', '')
+                for mt in ('conversation', 'summary', 'correction', 'emotion',
+                           'vision', 'agent', 'omni', 'tts')
+                for suffix in ('Provider', 'Url', 'Id', 'ApiKey')
+            },
+            "ttsVoiceId": core_cfg.get('ttsVoiceId', ''),
+            "success": True
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.get("/knowledge_base_plugin")
+async def get_knowledge_base_plugin_config_api():
+    """获取 knowledge_base 插件配置（含 profile 覆盖后的 effective config）。"""
+    try:
+        cfg, profile_name = await _fetch_plugin_config_effective_and_profile()
+        cfg["profile"] = profile_name
+        cfg["success"] = True
+        return cfg
+    except Exception as e:
+        logger.error(f"获取 knowledge_base 插件配置失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/knowledge_base_plugin")
+async def update_knowledge_base_plugin_config_api(request: Request):
+    """更新 knowledge_base 插件配置（写入 active profile 覆盖层，而非 plugin.toml）。"""
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return {"success": False, "error": "无效的数据"}
+
+        updates = {
+            "base_url": str(data.get("base_url", "")).strip(),
+            "api_key": str(data.get("api_key", "")).strip(),
+            "chat_model": str(data.get("chat_model", "")).strip(),
+            "embedding_model": str(data.get("embedding_model", "")).strip(),
+        }
+        # Optional fields: when provided, write-through to keep legacy and new UIs consistent.
+        optional_updates = {}
+        if "rag_mode" in data:
+            optional_updates["rag_mode"] = str(data.get("rag_mode", "")).strip()
+        if "doc_top_n" in data:
+            optional_updates["doc_top_n"] = data.get("doc_top_n")
+        if "context_budget_chars" in data:
+            optional_updates["context_budget_chars"] = data.get("context_budget_chars")
+        if "hybrid_alpha" in data:
+            optional_updates["hybrid_alpha"] = data.get("hybrid_alpha")
+        if "strict_embedding" in data:
+            optional_updates["strict_embedding"] = data.get("strict_embedding")
+        if "rerank_enabled" in data:
+            optional_updates["rerank_enabled"] = data.get("rerank_enabled")
+        if "rerank_model" in data:
+            optional_updates["rerank_model"] = data.get("rerank_model")
+        if "rerank_top_n" in data:
+            optional_updates["rerank_top_n"] = data.get("rerank_top_n")
+
+        import httpx
+        from config import USER_PLUGIN_SERVER_PORT
+
+        cfg_effective, profile_name = await _fetch_plugin_config_effective_and_profile()
+        existing_kb = cfg_effective.get("knowledge_base") if isinstance(cfg_effective, dict) else {}
+        if not isinstance(existing_kb, dict):
+            existing_kb = {}
+
+        # Preserve existing kb fields (e.g. rag_mode / retrieval params) to avoid accidental reset.
+        merged_kb = {**existing_kb, **updates, **optional_updates}
+
+        upsert_payload = {
+            "config": {
+                "knowledge_base": merged_kb
+            }
+            ,"make_active": True
+        }
+
+        base_url = f"http://127.0.0.1:{USER_PLUGIN_SERVER_PORT}"
+        async with httpx.AsyncClient(timeout=10, proxy=None, trust_env=False) as client:
+            upsert_resp = await client.put(
+                f"{base_url}/plugin/{_KB_PLUGIN_ID}/config/profiles/{profile_name}",
+                json=upsert_payload,
+            )
+            upsert_resp.raise_for_status()
+            upsert_result = upsert_resp.json() if upsert_resp.content else {}
+
+        profile_obj = upsert_result.get("profile") if isinstance(upsert_result, dict) else {}
+        profile = profile_obj if isinstance(profile_obj, dict) else {}
+
+        logger.info(
+            "knowledge_base 插件配置已写入 profile: plugin=%s profile=%s path=%s",
+            _KB_PLUGIN_ID,
+            profile_name,
+            profile.get("resolved_path"),
+        )
+
+        return {
+            "success": True,
+            "profile": profile_name,
+            "profile_path": profile.get("resolved_path"),
+            **updates,
+            **({"rag_mode": merged_kb.get("rag_mode")} if merged_kb.get("rag_mode") is not None else {}),
+        }
+    except Exception as e:
+        logger.error(f"更新 knowledge_base 插件配置失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+
+@router.post("/core_api")
+async def update_core_config(request: Request):
+    """更新核心配置（API Key）"""
+    try:
+        data = await request.json()
+        if not data:
+            return {"success": False, "error": "无效的数据"}
+        
+        # 检查是否启用了自定义API
+        enable_custom_api = data.get('enableCustomApi', False)
+        
+        # 如果启用了自定义API，不需要强制检查核心API key
+        if not enable_custom_api:
+            # 检查是否为免费版配置
+            is_free_version = data.get('coreApi') == 'free' or data.get('assistApi') == 'free'
+            
+            if 'coreApiKey' not in data:
+                return {"success": False, "error": "缺少coreApiKey字段"}
+            
+            api_key = data['coreApiKey']
+            if api_key is None:
+                return {"success": False, "error": "API Key不能为null"}
+            
+            if not isinstance(api_key, str):
+                return {"success": False, "error": "API Key必须是字符串类型"}
+            
+            api_key = api_key.strip()
+            
+            # 免费版允许使用 'free-access' 作为API key，不进行空值检查
+            if not is_free_version and not api_key:
+                return {"success": False, "error": "API Key不能为空"}
+        
+        # 保存到core_config.json
+        from pathlib import Path
+        from utils.config_manager import get_config_manager
+        config_manager = get_config_manager()
+        core_config_path = str(config_manager.get_config_path('core_config.json'))
+        # 确保配置目录存在
+        Path(core_config_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        # 构建配置对象
+        core_cfg = {}
+        
+        # 只有在启用自定义API时，才允许不设置coreApiKey
+        if enable_custom_api:
+            # 启用自定义API时，coreApiKey是可选的
+            if 'coreApiKey' in data:
+                api_key = data['coreApiKey']
+                if api_key is not None and isinstance(api_key, str):
+                    core_cfg['coreApiKey'] = api_key.strip()
+        else:
+            # 未启用自定义API时，必须设置coreApiKey
+            api_key = data.get('coreApiKey', '')
+            if api_key is not None and isinstance(api_key, str):
+                core_cfg['coreApiKey'] = api_key.strip()
+        if 'coreApi' in data:
+            core_cfg['coreApi'] = data['coreApi']
+        if 'assistApi' in data:
+            core_cfg['assistApi'] = data['assistApi']
+        _api_key_fields = [
+            'assistApiKeyQwen', 'assistApiKeyOpenai', 'assistApiKeyDeepseek',
+            'assistApiKeyGlm', 'assistApiKeyStep', 'assistApiKeySilicon',
+            'assistApiKeyGemini', 'assistApiKeyKimi', 'assistApiKeyDoubao',
+            'assistApiKeyMinimax', 'assistApiKeyMinimaxIntl', 'assistApiKeyGrok',
+        ]
+        for field in _api_key_fields:
+            if field in data:
+                core_cfg[field] = data[field]
+        if 'mcpToken' in data:
+            core_cfg['mcpToken'] = data['mcpToken']
+        if 'enableCustomApi' in data:
+            core_cfg['enableCustomApi'] = data['enableCustomApi']
+
+        # 自定义API配置（Provider / Url / Id / ApiKey per model type）
+        _model_types = [
+            'conversation', 'summary', 'correction', 'emotion',
+            'vision', 'agent', 'omni', 'tts',
+        ]
+        for mt in _model_types:
+            for suffix in ['Provider', 'Url', 'Id', 'ApiKey']:
+                field = f'{mt}Model{suffix}'
+                if field in data:
+                    core_cfg[field] = data[field]
+        if 'ttsVoiceId' in data:
+            core_cfg['ttsVoiceId'] = data['ttsVoiceId']
+        
+        atomic_write_json(core_config_path, core_cfg, indent=2, ensure_ascii=False)
+        
+        # API配置更新后，需要先通知所有客户端，再关闭session，最后重新加载配置
+        logger.info("API配置已更新，准备通知客户端并重置所有session...")
+        
+        # 1. 先通知所有连接的客户端即将刷新（WebSocket还连着）
+        notification_count = 0
+        session_manager = get_session_manager()
+        for lanlan_name, mgr in session_manager.items():
+            if mgr.is_active and mgr.websocket:
+                try:
+                    await mgr.websocket.send_text(json.dumps({
+                        "type": "reload_page",
+                        "message": "API配置已更新，页面即将刷新"
+                    }))
+                    notification_count += 1
+                    logger.info(f"已通知 {lanlan_name} 的前端刷新页面")
+                except Exception as e:
+                    logger.warning(f"通知 {lanlan_name} 的WebSocket失败: {e}")
+        
+        logger.info(f"已通知 {notification_count} 个客户端")
+        
+        # 2. 立刻关闭所有活跃的session（这会断开所有WebSocket）
+        sessions_ended = []
+        for lanlan_name, mgr in session_manager.items():
+            if mgr.is_active:
+                try:
+                    await mgr.end_session(by_server=True)
+                    sessions_ended.append(lanlan_name)
+                    logger.info(f"{lanlan_name} 的session已结束")
+                except Exception as e:
+                    logger.error(f"结束 {lanlan_name} 的session时出错: {e}")
+        
+        # 3. 重新加载配置并重建session manager
+        logger.info("正在重新加载配置...")
+        try:
+            initialize_character_data = get_initialize_character_data()
+            await initialize_character_data()
+            logger.info("配置重新加载完成，新的API配置已生效")
+        except Exception as reload_error:
+            logger.error(f"重新加载配置失败: {reload_error}")
+            return {"success": False, "error": f"配置已保存但重新加载失败: {str(reload_error)}"}
+        
+        # 4. Notify agent_server to rebuild CUA adapter with fresh config
+        try:
+            import httpx
+            from config import TOOL_SERVER_PORT
+            async with httpx.AsyncClient(timeout=5, proxy=None, trust_env=False) as client:
+                await client.post(f"http://127.0.0.1:{TOOL_SERVER_PORT}/notify_config_changed")
+            logger.info("已通知 agent_server 刷新 CUA 适配器")
+        except Exception as notify_err:
+            logger.warning(f"通知 agent_server 刷新 CUA 失败 (非致命): {notify_err}")
+
+        logger.info(f"已通知 {notification_count} 个连接的客户端API配置已更新")
+        return {"success": True, "message": "API Key已保存并重新加载配置", "sessions_ended": len(sessions_ended)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+
+@router.get("/api_providers")
+async def get_api_providers_config():
+    """获取API服务商配置（供前端使用）"""
+    try:
+        from utils.api_config_loader import (
+            get_config,
+            get_core_api_providers_for_frontend,
+            get_assist_api_providers_for_frontend,
+        )
+
+        full_config = get_config()
+        # 使用缓存加载配置（性能更好，配置更新后需要重启服务）
+        core_providers = get_core_api_providers_for_frontend()
+        assist_providers = get_assist_api_providers_for_frontend()
+
+        return {
+            "success": True,
+            "core_api_providers": core_providers,
+            "assist_api_providers": assist_providers,
+            "api_key_registry": full_config.get("api_key_registry", {}),
+            "assist_api_providers_full": full_config.get("assist_api_providers", {}),
+            "core_api_providers_full": full_config.get("core_api_providers", {}),
+        }
+    except Exception as e:
+        logger.error(f"获取API服务商配置失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "core_api_providers": [],
+            "assist_api_providers": [],
+        }
+
+
+@router.post("/gptsovits/list_voices")
+async def list_gptsovits_voices(request: Request):
+    """代理请求到 GPT-SoVITS v3 API 获取可用语音配置列表"""
+    import aiohttp
+    from urllib.parse import urlparse
+    import ipaddress
+    try:
+        data = await request.json()
+        api_url = data.get("api_url", "").rstrip("/")
+
+        if not api_url:
+            return JSONResponse({"success": False, "error": "TTS_GPT_SOVITS_URL_REQUIRED", "code": "TTS_GPT_SOVITS_URL_REQUIRED"}, status_code=400)
+
+        # SSRF 防护: 限制 api_url 只能是 localhost
+        parsed = urlparse(api_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return JSONResponse({"success": False, "error": "TTS_GPT_SOVITS_URL_INVALID", "code": "TTS_GPT_SOVITS_URL_INVALID"}, status_code=400)
+        host = parsed.hostname
+        try:
+            if not ipaddress.ip_address(host).is_loopback:
+                return JSONResponse({"success": False, "error": "TTS_CUSTOM_URL_LOCALHOST_ONLY", "code": "TTS_CUSTOM_URL_LOCALHOST_ONLY"}, status_code=400)
+        except ValueError:
+            if host not in ("localhost",):
+                return JSONResponse({"success": False, "error": "TTS_CUSTOM_URL_LOCALHOST_ONLY", "code": "TTS_CUSTOM_URL_LOCALHOST_ONLY"}, status_code=400)
+
+        endpoint = f"{api_url}/api/v3/voices"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(endpoint, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                try:
+                    result = await resp.json(content_type=None)
+                except Exception:
+                    text = await resp.text()
+                    logger.error(f"GPT-SoVITS v3 API 返回非 JSON 响应 (HTTP {resp.status}): {text[:200]}")
+                    return {"success": False, "error": "Upstream TTS service error", "code": "TTS_CONNECTION_FAILED"}
+                if resp.status == 200:
+                    return {"success": True, "voices": result}
+                logger.error(f"GPT-SoVITS v3 API 返回错误状态 HTTP {resp.status}: {str(result)[:200]}")
+                return {"success": False, "error": "Upstream TTS service error", "code": "TTS_CONNECTION_FAILED"}
+    except aiohttp.ClientError as e:
+        logger.error(f"GPT-SoVITS v3 API 请求失败: {e}")
+        return {"success": False, "error": "Internal TTS connection error", "code": "TTS_CONNECTION_FAILED"}
+    except Exception as e:
+        logger.error(f"获取 GPT-SoVITS 语音列表失败: {e}")
+        return {"success": False, "error": "Internal TTS connection error", "code": "TTS_CONNECTION_FAILED"}
+
+
+def _sanitize_proxies(proxies: dict[str, str]) -> dict[str, str]:
+    """Remove credentials from proxy URLs before returning to the client."""
+    sanitized: dict[str, str] = {}
+    for scheme, url in proxies.items():
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.username or parsed.password:
+                # Rebuild without credentials
+                netloc = parsed.hostname or ""
+                if parsed.port:
+                    netloc += f":{parsed.port}"
+                sanitized[scheme] = urllib.parse.urlunparse(
+                    (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+                )
+            else:
+                sanitized[scheme] = url
+        except Exception:
+            sanitized[scheme] = "<redacted>"
+    return sanitized
+
+
+@router.post("/set_proxy_mode")
+async def set_proxy_mode(request: Request):
+    """运行时热切换代理模式。
+
+    body: { "direct": true }   → 直连（禁用代理）
+    body: { "direct": false }  → 恢复系统代理
+    """
+    try:
+        data = await request.json()
+        raw_direct = data.get("direct", False)
+        if isinstance(raw_direct, bool):
+            direct = raw_direct
+        elif isinstance(raw_direct, str):
+            direct = raw_direct.lower() in ("true", "1", "yes")
+        else:
+            direct = bool(raw_direct)
+
+        # 代理相关环境变量 key 列表
+        proxy_keys = [
+            'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+            'http_proxy', 'https_proxy', 'all_proxy',
+        ]
+
+        global _proxy_snapshot
+        all_keys = proxy_keys + ['NO_PROXY', 'no_proxy']
+        with _PROXY_LOCK:
+            if direct:
+                # 仅在首次切换到直连时保存快照，避免重复调用覆盖原始值
+                if not _proxy_snapshot:
+                    _proxy_snapshot = {k: os.environ[k] for k in all_keys if k in os.environ}
+                # 设置 NO_PROXY=* 使 httpx/aiohttp/urllib 跳过 Windows 注册表系统代理
+                os.environ['NO_PROXY'] = '*'
+                os.environ['no_proxy'] = '*'
+                for key in proxy_keys:
+                    os.environ.pop(key, None)
+                logger.info("[ProxyMode] 已切换到直连模式 (NO_PROXY=*)")
+            else:
+                if _proxy_snapshot:
+                    # 从快照恢复所有代理相关环境变量（含 NO_PROXY）
+                    for k in all_keys:
+                        if k in _proxy_snapshot:
+                            os.environ[k] = _proxy_snapshot[k]
+                        else:
+                            os.environ.pop(k, None)
+                    _proxy_snapshot = {}
+                    logger.info("[ProxyMode] 已恢复系统代理模式")
+                else:
+                    logger.info("[ProxyMode] 无快照可恢复，保持当前环境变量")
+
+        import urllib.request
+        proxies_after = _sanitize_proxies(urllib.request.getproxies())
+        return {"success": True, "direct": direct, "proxies_after": proxies_after}
+    except Exception:
+        logger.exception("[ProxyMode] 切换失败")
+        return JSONResponse({"success": False, "error": "切换失败，服务器内部错误"}, status_code=500)

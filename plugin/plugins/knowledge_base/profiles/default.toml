@@ -1,0 +1,6 @@
+[knowledge_base]
+base_url = ""
+api_key = ""
+chat_model = ""
+embedding_model = ""
+rag_mode = "quote_first"
