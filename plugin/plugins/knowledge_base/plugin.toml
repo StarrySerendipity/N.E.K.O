@@ -20,10 +20,10 @@ auto_start = true
 enabled = false
 
 [knowledge_base]
-base_url = "https://api.siliconflow.cn/v1"
-api_key = "sk-swimsjmrstgxwrdjegvvztwaaqqihxtpmvbruxivovhxmzxl"
-chat_model = "zai-org/GLM-4.6V"
-embedding_model = "Qwen/Qwen3-Embedding-8B"
+base_url = ""
+api_key = ""
+chat_model = ""
+embedding_model = ""
 rag_mode = "answer_only"
 doc_top_n = 1
 context_budget_chars = 14000
