@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>表情包推送 — N.E.K.O</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f13;
+      --surface: #1a1a24;
+      --surface2: #242433;
+      --border: #2e2e44;
+      --accent: #7c6af7;
+      --accent-hover: #9a8bff;
+      --text: #e8e8f0;
+      --text-muted: #888899;
+      --success: #4caf7d;
+      --error: #e05353;
+      --radius: 10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; }
+    header span { font-size: 24px; }
+
+    main {
+      flex: 1;
+      padding: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* Upload zone */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      background: var(--surface);
+      margin-bottom: 24px;
+    }
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--surface2);
+    }
+    .upload-zone input[type="file"] { display: none; }
+    .upload-zone .icon { font-size: 40px; margin-bottom: 10px; }
+    .upload-zone p { color: var(--text-muted); font-size: 14px; }
+    .upload-zone strong { color: var(--accent); }
+
+    /* Gallery */
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 14px;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .emoji-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      transition: border-color .15s, transform .1s;
+      position: relative;
+    }
+    .emoji-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .emoji-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+
+    .emoji-card img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: contain;
+      background: #111118;
+      padding: 8px;
+    }
+    .emoji-card-name {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 6px 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .emoji-card-del {
+      position: absolute;
+      top: 4px; right: 4px;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: rgba(0,0,0,.6);
+      border: none;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .emoji-card:hover .emoji-card-del { display: flex; }
+    .emoji-card-del:hover { background: var(--error); }
+
+    .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 32px;
+      font-size: 14px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      margin-bottom: 24px;
+    }
+    .empty-state .empty-icon { font-size: 36px; display: block; margin-bottom: 10px; }
+
+    /* Action bar */
+    .action-bar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 16px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .action-bar label { font-size: 13px; color: var(--text-muted); }
+    .action-bar input[type="text"] {
+      flex: 1;
+      min-width: 160px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+    .action-bar input[type="text"]:focus { border-color: var(--accent); }
+
+    button {
+      padding: 8px 18px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) { border-color: var(--accent); }
+
+    /* Toast */
+    #toast-container {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 9999;
+    }
+    .toast {
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #fff;
+      opacity: 0;
+      transform: translateY(8px);
+      animation: toast-in .2s forwards, toast-out .3s 2.7s forwards;
+      min-width: 200px;
+      max-width: 320px;
+    }
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--error); }
+    .toast.info { background: var(--accent); }
+    @keyframes toast-in  { to { opacity: 1; transform: none; } }
+    @keyframes toast-out { to { opacity: 0; transform: translateY(8px); } }
+
+    /* Status bar */
+    #status-bar {
+      padding: 6px 24px;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background .3s;
+    }
+    #status-dot.ok { background: var(--success); }
+    #status-dot.busy { background: #f0a040; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .selected-hint {
+      font-size: 13px;
+      color: var(--text-muted);
+      padding: 8px 0;
+    }
+    .selected-hint strong { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <span>🎭</span>
+    <h1>表情包推送</h1>
+  </header>
+
+  <main>
+    <!-- Upload Zone -->
+    <div class="upload-zone" id="drop-zone">
+      <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp" multiple />
+      <div class="icon">📂</div>
+      <p><strong>点击选择</strong> 或拖拽图片到此处</p>
+      <p>支持 JPG、PNG、GIF、WebP、BMP（单文件 ≤ 5 MB）</p>
+    </div>
+
+    <!-- Action bar -->
+    <div class="action-bar">
+      <label for="desc-input">描述（可选）</label>
+      <input type="text" id="desc-input" placeholder="留空则自动使用文件名" maxlength="120" />
+      <button class="btn-primary" id="btn-push" disabled>🚀 推送到对话</button>
+      <button class="btn-secondary" id="btn-clear-sel">取消选择</button>
+    </div>
+
+    <div class="selected-hint" id="sel-hint">请从图库中点击选择一个表情包</div>
+
+    <!-- Gallery -->
+    <div class="section-title">本地图库</div>
+    <div id="gallery" class="gallery"></div>
+  </main>
+
+  <footer id="status-bar">
+    <div id="status-dot"></div>
+    <span id="status-text">就绪</span>
+  </footer>
+
+  <div id="toast-container"></div>
+
+  <script>
+    "use strict";
+
+    // ────────── Config ──────────
+    // Derive plugin server origin from current page origin
+    // The static UI is served by the plugin server itself, so same origin applies.
+    const API_BASE = "";          // same origin as the page
+    const PLUGIN_ID = "emoji_pusher";
+    const ENTRY_PUSH = "push_emoji";
+    const LS_KEY = "neko_emoji_gallery_v1";
+    const MAX_SIZE = 5 * 1024 * 1024;
+
+    // ────────── State ──────────
+    let gallery = [];   // [{id, filename, dataUrl, size}]
+    let selectedId = null;
+
+    // ────────── Helpers ──────────
+    function toast(msg, type = "info") {
+      const el = document.createElement("div");
+      el.className = `toast ${type}`;
+      el.textContent = msg;
+      document.getElementById("toast-container").appendChild(el);
+      setTimeout(() => el.remove(), 3200);
+    }
+
+    function setStatus(text, state = "ok") {
+      document.getElementById("status-text").textContent = text;
+      const dot = document.getElementById("status-dot");
+      dot.className = state === "busy" ? "busy" : (state === "ok" ? "ok" : "");
+    }
+
+    function loadGallery() {
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        gallery = raw ? JSON.parse(raw) : [];
+      } catch { gallery = []; }
+      renderGallery();
+    }
+
+    function saveGallery() {
+      try { localStorage.setItem(LS_KEY, JSON.stringify(gallery)); } catch {}
+    }
+
+    function genId() {
+      return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    }
+
+    // ────────── Gallery render ──────────
+    function renderGallery() {
+      const container = document.getElementById("gallery");
+      container.innerHTML = "";
+
+      if (gallery.length === 0) {
+        const es = document.createElement("div");
+        es.className = "empty-state";
+        es.innerHTML = `<span class="empty-icon">🌸</span>图库为空，上传表情包后会显示在这里`;
+        container.parentNode.insertBefore(es, container.nextSibling);
+        return;
+      }
+
+      // remove any old empty-state
+      const old = document.querySelector(".empty-state");
+      if (old) old.remove();
+
+      gallery.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "emoji-card" + (item.id === selectedId ? " selected" : "");
+        card.dataset.id = item.id;
+
+        const img = document.createElement("img");
+        img.src = item.dataUrl;
+        img.alt = item.filename;
+        img.loading = "lazy";
+
+        const nameEl = document.createElement("div");
+        nameEl.className = "emoji-card-name";
+        nameEl.textContent = item.filename;
+        nameEl.title = item.filename;
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "emoji-card-del";
+        delBtn.textContent = "×";
+        delBtn.title = "从图库删除";
+        delBtn.addEventListener("click", e => {
+          e.stopPropagation();
+          deleteItem(item.id);
+        });
+
+        card.appendChild(img);
+        card.appendChild(nameEl);
+        card.appendChild(delBtn);
+        card.addEventListener("click", () => selectItem(item.id));
+        container.appendChild(card);
+      });
+    }
+
+    function selectItem(id) {
+      selectedId = id;
+      renderGallery();
+      const item = gallery.find(g => g.id === id);
+      const hint = document.getElementById("sel-hint");
+      if (item) {
+        hint.innerHTML = `已选择: <strong>${escapeHtml(item.filename)}</strong>（${formatSize(item.size)}）`;
+      }
+      document.getElementById("btn-push").disabled = false;
+    }
+
+    function deleteItem(id) {
+      gallery = gallery.filter(g => g.id !== id);
+      if (selectedId === id) {
+        selectedId = null;
+        document.getElementById("btn-push").disabled = true;
+        document.getElementById("sel-hint").textContent = "请从图库中点击选择一个表情包";
+      }
+      saveGallery();
+      renderGallery();
+    }
+
+    // ────────── File handling ──────────
+    function addFiles(files) {
+      let added = 0;
+      Array.from(files).forEach(file => {
+        if (file.size > MAX_SIZE) {
+          toast(`${file.name} 超过 5 MB 限制，已跳过`, "error");
+          return;
+        }
+        const allowed = [".jpg",".jpeg",".png",".gif",".webp",".bmp"];
+        const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+        if (!allowed.includes(ext)) {
+          toast(`不支持的格式: ${ext}，已跳过`, "error");
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = e => {
+          gallery.push({ id: genId(), filename: file.name, dataUrl: e.target.result, size: file.size });
+          saveGallery();
+          renderGallery();
+        };
+        reader.readAsDataURL(file);
+        added++;
+      });
+      if (added > 0) toast(`已添加 ${added} 张表情包`, "success");
+    }
+
+    // ────────── Push ──────────
+    async function pushSelected() {
+      const item = gallery.find(g => g.id === selectedId);
+      if (!item) { toast("请先选择一个表情包", "error"); return; }
+
+      const descInput = document.getElementById("desc-input");
+      const description = descInput.value.trim();
+
+      setStatus("推送中…", "busy");
+      document.getElementById("btn-push").disabled = true;
+
+      // Strip data URI prefix before sending
+      let b64 = item.dataUrl;
+      if (b64.includes(",")) b64 = b64.split(",")[1];
+
+      try {
+        const resp = await fetch(`${API_BASE}/runs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            plugin_id: PLUGIN_ID,
+            entry_id: ENTRY_PUSH,
+            args: {
+              image_base64: b64,
+              filename: item.filename,
+              description: description,
+            },
+          }),
+        });
+
+        const data = await resp.json().catch(() => ({}));
+
+        if (!resp.ok) {
+          const msg = data?.detail || data?.message || `HTTP ${resp.status}`;
+          throw new Error(msg);
+        }
+
+        toast(`✅ 表情包已推送到对话！`, "success");
+        setStatus("推送成功", "ok");
+      } catch (err) {
+        toast(`推送失败: ${err.message}`, "error");
+        setStatus("推送失败", "");
+      } finally {
+        document.getElementById("btn-push").disabled = (selectedId === null);
+      }
+    }
+
+    // ────────── Utilities ──────────
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + " B";
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+      return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    // ────────── Event listeners ──────────
+    const dropZone = document.getElementById("drop-zone");
+    const fileInput = document.getElementById("file-input");
+
+    dropZone.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", e => addFiles(e.target.files));
+
+    dropZone.addEventListener("dragover", e => {
+      e.preventDefault();
+      dropZone.classList.add("drag-over");
+    });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+    dropZone.addEventListener("drop", e => {
+      e.preventDefault();
+      dropZone.classList.remove("drag-over");
+      addFiles(e.dataTransfer.files);
+    });
+
+    document.getElementById("btn-push").addEventListener("click", pushSelected);
+    document.getElementById("btn-clear-sel").addEventListener("click", () => {
+      selectedId = null;
+      document.getElementById("btn-push").disabled = true;
+      document.getElementById("sel-hint").textContent = "请从图库中点击选择一个表情包";
+      renderGallery();
+    });
+
+    // ────────── Init ──────────
+    loadGallery();
+    setStatus("就绪", "ok");
+  </script>
+</body>
+</html>
