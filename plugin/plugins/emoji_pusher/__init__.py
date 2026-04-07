@@ -86,7 +86,7 @@ def _validate_image(image_base64: str, filename: str) -> tuple[bytes, str] | tup
 
     if len(image_bytes) > _MAX_SIZE_BYTES:
         size_mb = len(image_bytes) / (1024 * 1024)
-        limit_mb = _MAX_SIZE_BYTES // (1024 * 1024)
+        limit_mb = _MAX_SIZE_BYTES / (1024 * 1024)
         return None, f"图片大小 {size_mb:.1f} MB 超过限制 {limit_mb} MB"
 
     return image_bytes, ext

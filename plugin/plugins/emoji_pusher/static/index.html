@@ -336,14 +336,10 @@
       container.innerHTML = "";
 
       if (gallery.length === 0) {
-        container.outerHTML; // keep selector valid
-        const empty = document.getElementById("gallery");
-        empty.innerHTML = "";
-        // show empty state
         const es = document.createElement("div");
         es.className = "empty-state";
         es.innerHTML = `<span class="empty-icon">🌸</span>图库为空，上传表情包后会显示在这里`;
-        empty.parentNode.insertBefore(es, empty.nextSibling);
+        container.parentNode.insertBefore(es, container.nextSibling);
         return;
       }
 
