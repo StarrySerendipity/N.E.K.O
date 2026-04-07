@@ -1,0 +1,17 @@
+[plugin]
+name = "表情包推送"
+description = "表情包上传与推送插件。通过 Web UI 上传和管理表情包，并将其推送到 NEKO 主对话窗口。Web UI 地址：/plugin/emoji_pusher/ui/"
+version = "0.1.0"
+id = "emoji_pusher"
+entry = "plugin.plugins.emoji_pusher:EmojiPusherPlugin"
+
+[plugin.author]
+name = "N.E.K.O Team"
+
+[plugin.sdk]
+recommended = ">=0.1.0,<0.2.0"
+supported = ">=0.1.0,<0.3.0"
+
+[plugin_runtime]
+enabled = true
+auto_start = true

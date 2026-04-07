@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>N.E.K.O 表情包推送</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --surface2: #0f3460;
+      --accent: #e94560;
+      --accent2: #a855f7;
+      --text: #e2e8f0;
+      --text-dim: #94a3b8;
+      --border: #334155;
+      --success: #10b981;
+      --error: #ef4444;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    header {
+      text-align: center;
+      padding: 20px 0 24px;
+    }
+    header h1 {
+      font-size: 1.8rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header p { color: var(--text-dim); margin-top: 6px; font-size: 0.9rem; }
+
+    .container { max-width: 960px; margin: 0 auto; }
+
+    /* Upload zone */
+    .upload-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+      border: 1px solid var(--border);
+    }
+    .upload-section h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--text-dim); }
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(233, 69, 96, 0.05);
+    }
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .drop-zone .icon { font-size: 2.5rem; margin-bottom: 8px; }
+    .drop-zone p { color: var(--text-dim); }
+    .drop-zone p strong { color: var(--accent); }
+
+    .label-row {
+      display: flex; gap: 12px; margin-top: 16px; align-items: center;
+    }
+    .label-row input[type="text"] {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .label-row input[type="text"]:focus { border-color: var(--accent); }
+    button.btn {
+      padding: 10px 22px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: 600;
+    }
+    button.btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: white;
+    }
+    button.btn-primary:hover { opacity: 0.85; transform: translateY(-1px); }
+    button.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    button.btn-push {
+      background: linear-gradient(135deg, #10b981, #0ea5e9);
+      color: white;
+      padding: 8px 16px;
+      font-size: 0.88rem;
+    }
+    button.btn-push:hover { opacity: 0.85; }
+    button.btn-danger {
+      background: transparent;
+      border: 1px solid var(--error);
+      color: var(--error);
+      padding: 6px 12px;
+      font-size: 0.82rem;
+    }
+    button.btn-danger:hover { background: rgba(239,68,68,0.1); }
+
+    /* Preview before upload */
+    #preview-container {
+      display: none;
+      margin-top: 16px;
+      background: var(--surface2);
+      border-radius: var(--radius);
+      padding: 16px;
+      align-items: center;
+      gap: 16px;
+    }
+    #preview-container img {
+      max-width: 120px;
+      max-height: 120px;
+      border-radius: 8px;
+      object-fit: contain;
+      background: rgba(255,255,255,0.05);
+    }
+    #preview-info { flex: 1; }
+    #preview-info .filename { font-weight: 600; margin-bottom: 4px; }
+    #preview-info .filesize { color: var(--text-dim); font-size: 0.85rem; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 20px;
+      font-size: 0.9rem;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.3s;
+      pointer-events: none;
+      max-width: 320px;
+      z-index: 1000;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.success { border-color: var(--success); color: var(--success); }
+    #toast.error { border-color: var(--error); color: var(--error); }
+
+    /* Emoji grid */
+    .gallery-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      border: 1px solid var(--border);
+    }
+    .gallery-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+    }
+    .gallery-header h2 { font-size: 1.1rem; color: var(--text-dim); }
+    .refresh-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+    }
+    .refresh-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+    .emoji-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 16px;
+    }
+    .emoji-card {
+      background: var(--surface2);
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .emoji-card:hover { transform: translateY(-2px); border-color: var(--accent2); }
+    .emoji-card .img-wrap {
+      height: 120px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.03);
+      padding: 8px;
+    }
+    .emoji-card img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain;
+      border-radius: 4px;
+    }
+    .emoji-card .card-body { padding: 12px; }
+    .emoji-card .label {
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .push-msg-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      margin-bottom: 8px;
+      outline: none;
+    }
+    .push-msg-input:focus { border-color: var(--accent2); }
+    .push-msg-input::placeholder { color: var(--text-dim); }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-dim);
+    }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎭 N.E.K.O 表情包推送</h1>
+      <p>上传表情包，一键推送到 NEKO 主对话框</p>
+    </header>
+
+    <!-- Upload Section -->
+    <div class="upload-section">
+      <h2>📤 上传新表情包</h2>
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept="image/*" />
+        <div class="icon">🖼️</div>
+        <p>拖拽图片到此处，或 <strong>点击选择文件</strong></p>
+        <p style="margin-top:6px; font-size:0.82rem;">支持 PNG · JPEG · GIF · WebP · BMP · SVG（最大 5 MB）</p>
+      </div>
+      <div id="preview-container">
+        <img id="preview-img" src="" alt="预览" />
+        <div id="preview-info">
+          <div class="filename" id="preview-filename"></div>
+          <div class="filesize" id="preview-filesize"></div>
+        </div>
+      </div>
+      <div class="label-row">
+        <input type="text" id="label-input" placeholder="表情包标签（可选，默认使用文件名）" />
+        <button class="btn btn-primary" id="upload-btn" disabled>上传</button>
+      </div>
+    </div>
+
+    <!-- Gallery Section -->
+    <div class="gallery-section">
+      <div class="gallery-header">
+        <h2>🎨 已上传的表情包</h2>
+        <button class="refresh-btn" id="refresh-btn">刷新列表</button>
+      </div>
+      <div class="emoji-grid" id="emoji-grid">
+        <div class="empty-state">
+          <div class="icon">😶</div>
+          <div>加载中...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    const PLUGIN_SERVER_PORT = 48916;
+    const PLUGIN_ID = 'emoji_pusher';
+    const API_BASE = `http://localhost:${PLUGIN_SERVER_PORT}`;
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `show ${type}`;
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => { t.className = ''; }, 3200);
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+    }
+
+    function callEntry(entryId, args = {}) {
+      return fetch(`${API_BASE}/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plugin_id: PLUGIN_ID, entry_id: entryId, args }),
+      }).then(r => r.json());
+    }
+
+    // ── File selection & preview ──────────────────────────────────────────
+
+    let selectedFile = null;
+
+    function handleFile(file) {
+      if (!file) return;
+      selectedFile = file;
+
+      const reader = new FileReader();
+      reader.onload = e => {
+        document.getElementById('preview-img').src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+
+      document.getElementById('preview-filename').textContent = file.name;
+      document.getElementById('preview-filesize').textContent = formatSize(file.size);
+      document.getElementById('preview-container').style.display = 'flex';
+      document.getElementById('upload-btn').disabled = false;
+    }
+
+    document.getElementById('file-input').addEventListener('change', e => {
+      handleFile(e.target.files[0]);
+    });
+
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+
+    // ── Upload ────────────────────────────────────────────────────────────
+
+    document.getElementById('upload-btn').addEventListener('click', async () => {
+      if (!selectedFile) return;
+      const btn = document.getElementById('upload-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>上传中...';
+
+      try {
+        const arrayBuf = await selectedFile.arrayBuffer();
+        const uint8 = new Uint8Array(arrayBuf);
+        let binary = '';
+        for (let i = 0; i < uint8.byteLength; i++) binary += String.fromCharCode(uint8[i]);
+        const b64 = btoa(binary);
+
+        const label = document.getElementById('label-input').value.trim();
+        const result = await callEntry('upload_emoji', {
+          filename: selectedFile.name,
+          data: b64,
+          label,
+        });
+
+        if (result.status === 'ok' || result.result) {
+          showToast('✅ 表情包上传成功！', 'success');
+          selectedFile = null;
+          document.getElementById('preview-container').style.display = 'none';
+          document.getElementById('label-input').value = '';
+          document.getElementById('file-input').value = '';
+          btn.disabled = true;
+          btn.textContent = '上传';
+          await loadEmojis();
+        } else {
+          const errMsg = result.error || result.detail || '上传失败';
+          showToast(`❌ ${errMsg}`, 'error');
+          btn.disabled = false;
+          btn.textContent = '上传';
+        }
+      } catch (err) {
+        showToast(`❌ 网络错误: ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = '上传';
+      }
+    });
+
+    // ── Gallery ───────────────────────────────────────────────────────────
+
+    async function loadEmojis() {
+      const grid = document.getElementById('emoji-grid');
+      grid.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><div>加载中...</div></div>';
+
+      try {
+        const result = await callEntry('list_emojis', {});
+        const emojis = result?.result?.emojis || result?.emojis || [];
+
+        if (emojis.length === 0) {
+          grid.innerHTML = '<div class="empty-state"><div class="icon">😶</div><div>还没有表情包，快去上传一个吧！</div></div>';
+          return;
+        }
+
+        grid.innerHTML = '';
+        emojis.forEach(em => {
+          const card = document.createElement('div');
+          card.className = 'emoji-card';
+          const imgUrl = em.url;
+          card.innerHTML = `
+            <div class="img-wrap">
+              <img src="${imgUrl}" alt="${em.label}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><text y=%2218%22 font-size=%2218%22>🖼️</text></svg>'" />
+            </div>
+            <div class="card-body">
+              <div class="label" title="${em.label}">${em.label}</div>
+              <input class="push-msg-input" type="text" placeholder="附带文字（可选）" id="msg-${em.id}" />
+              <div class="card-actions">
+                <button class="btn btn-push" onclick="pushEmoji('${em.id}')">🚀 推送</button>
+                <button class="btn btn-danger" onclick="deleteEmoji('${em.id}', this)">删除</button>
+              </div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      } catch (err) {
+        grid.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div>加载失败: ${err.message}</div></div>`;
+      }
+    }
+
+    async function pushEmoji(emojiId) {
+      const msgInput = document.getElementById(`msg-${emojiId}`);
+      const message = msgInput ? msgInput.value.trim() : '';
+
+      try {
+        const result = await callEntry('push_emoji', { emoji_id: emojiId, message });
+        if (result.status === 'ok' || result.result) {
+          showToast('🚀 表情包已推送到 NEKO！', 'success');
+          if (msgInput) msgInput.value = '';
+        } else {
+          const errMsg = result.error || result.detail || '推送失败';
+          showToast(`❌ ${errMsg}`, 'error');
+        }
+      } catch (err) {
+        showToast(`❌ 网络错误: ${err.message}`, 'error');
+      }
+    }
+
+    async function deleteEmoji(emojiId, btn) {
+      if (!confirm('确定要删除这个表情包吗？')) return;
+      btn.disabled = true;
+      btn.textContent = '删除中...';
+
+      try {
+        const result = await callEntry('delete_emoji', { emoji_id: emojiId });
+        if (result.status === 'ok' || result.result) {
+          showToast('🗑️ 表情包已删除', 'success');
+          await loadEmojis();
+        } else {
+          const errMsg = result.error || result.detail || '删除失败';
+          showToast(`❌ ${errMsg}`, 'error');
+          btn.disabled = false;
+          btn.textContent = '删除';
+        }
+      } catch (err) {
+        showToast(`❌ 网络错误: ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = '删除';
+      }
+    }
+
+    document.getElementById('refresh-btn').addEventListener('click', loadEmojis);
+
+    // Initial load
+    loadEmojis();
+  </script>
+</body>
+</html>
