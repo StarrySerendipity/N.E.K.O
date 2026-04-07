@@ -1,0 +1,2 @@
+# This directory is used to store uploaded emoji images at runtime.
+# It is served via the plugin's static UI at /plugin/emoji_pusher/ui/uploads/
