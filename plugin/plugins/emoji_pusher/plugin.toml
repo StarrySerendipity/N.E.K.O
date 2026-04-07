@@ -1,0 +1,20 @@
+[plugin]
+id = "emoji_pusher"
+name = "表情包推送"
+description = "上传并推送表情包到主对话窗口。Web UI 访问地址：/plugin/emoji_pusher/ui/"
+version = "0.1.0"
+entry = "plugin.plugins.emoji_pusher:EmojiPusherPlugin"
+
+[plugin.author]
+name = "N.E.K.O Team"
+
+[plugin.sdk]
+recommended = ">=0.1.0,<0.2.0"
+supported = ">=0.1.0,<0.3.0"
+
+[plugin_runtime]
+enabled = true
+auto_start = true
+
+[plugin.store]
+enabled = true
